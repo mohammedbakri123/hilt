@@ -54,3 +54,13 @@ func (p Paths) ConfigFile() string {
 func (p Paths) StateFile() string {
 	return filepath.Join(p.StateDir, "state.json")
 }
+
+// InstallManifestFile is the managed SDK install manifest path.
+func (p Paths) InstallManifestFile() string {
+	return filepath.Join(p.DataDir, "installs.json")
+}
+
+// InstallLockFile is the managed SDK install lock path.
+func (p Paths) InstallLockFile() string {
+	return filepath.Join(p.DataDir, "installs.lock")
+}

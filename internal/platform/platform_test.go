@@ -103,6 +103,12 @@ func TestNewPathsXDG(t *testing.T) {
 	if paths.ManagedRoot != "/tmp/data/hilt/dotnet" {
 		t.Errorf("ManagedRoot = %q", paths.ManagedRoot)
 	}
+	if paths.InstallManifestFile() != "/tmp/data/hilt/installs.json" {
+		t.Errorf("InstallManifestFile = %q", paths.InstallManifestFile())
+	}
+	if paths.InstallLockFile() != "/tmp/data/hilt/installs.lock" {
+		t.Errorf("InstallLockFile = %q", paths.InstallLockFile())
+	}
 }
 
 func TestNewPathsHomeFallback(t *testing.T) {

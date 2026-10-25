@@ -1,0 +1,552 @@
+package install
+
+import (
+	"context"
+	"crypto/sha512"
+	"crypto/subtle"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/process"
+)
+
+const (
+	defaultMaxDownloadBytes  = 2 << 30
+	defaultMaxExtractBytes   = 4 << 30
+	defaultMaxArchiveEntries = 100000
+)
+
+// Plan describes an SDK installation before any download occurs.
+type Plan struct {
+	Version          string `json:"version"`
+	RID              string `json:"rid"`
+	Root             string `json:"root"`
+	DotnetPath       string `json:"dotnetPath"`
+	SourceURL        string `json:"sourceUrl,omitempty"`
+	SHA512           string `json:"sha512,omitempty"`
+	FileName         string `json:"fileName,omitempty"`
+	AlreadyInstalled bool   `json:"alreadyInstalled"`
+	SystemCopy       bool   `json:"systemCopy,omitempty"`
+}
+
+// Result describes a completed or already-present managed installation.
+type Result struct {
+	Version          string    `json:"version"`
+	RID              string    `json:"rid"`
+	Root             string    `json:"root"`
+	DotnetPath       string    `json:"dotnetPath"`
+	SourceURL        string    `json:"sourceUrl,omitempty"`
+	SHA512           string    `json:"sha512,omitempty"`
+	InstalledAt      time.Time `json:"installedAt"`
+	AlreadyInstalled bool      `json:"alreadyInstalled"`
+	SystemCopy       bool      `json:"systemCopy,omitempty"`
+}
+
+// UnownedRootError reports a destination that exists without a manifest entry.
+type UnownedRootError struct {
+	Root string
+}
+
+func (e *UnownedRootError) Error() string {
+	return fmt.Sprintf("destination %s already exists but is not recorded in Hilt's install manifest; refusing to overwrite it", e.Root)
+}
+
+// StaleInstallError reports a manifest entry whose root is missing.
+type StaleInstallError struct {
+	Version string
+	Root    string
+}
+
+func (e *StaleInstallError) Error() string {
+	return fmt.Sprintf("install manifest records SDK %s at %s, but that directory is missing", e.Version, e.Root)
+}
+
+// Installer downloads, verifies, and publishes managed SDKs.
+type Installer struct {
+	ManagedRoot       string
+	ManifestPath      string
+	LockPath          string
+	Metadata          *ReleaseClient
+	Runner            process.Runner
+	HTTPClient        *http.Client
+	ValidateURL       func(*url.URL) error
+	BaseEnv           []string
+	MaxDownloadBytes  int64
+	MaxExtractBytes   int64
+	MaxArchiveEntries int
+	Now               func() time.Time
+}
+
+// Plan resolves metadata and checks for an existing installation.
+func (i Installer) Plan(ctx context.Context, version string) (Plan, error) {
+	parsed, err := ValidateVersion(version)
+	if err != nil {
+		return Plan{}, err
+	}
+	rid, err := CurrentRID()
+	if err != nil {
+		return Plan{}, err
+	}
+	managedRoot, err := i.managedRoot()
+	if err != nil {
+		return Plan{}, err
+	}
+	manifest, err := Load(i.manifestPath(managedRoot), managedRoot)
+	if err != nil {
+		return Plan{}, err
+	}
+
+	canonical := parsed.String()
+	if entry := manifest.Find(canonical); entry != nil {
+		root := manifest.RootFor(*entry)
+		info, statErr := os.Stat(root)
+		if statErr != nil || !info.IsDir() || !usableRoot(root, canonical) {
+			return Plan{}, &StaleInstallError{Version: canonical, Root: root}
+		}
+		return planFromEntry(*entry, root, true), nil
+	}
+
+	root := filepath.Join(managedRoot, canonical)
+	if info, statErr := os.Stat(root); statErr == nil {
+		if !info.IsDir() {
+			return Plan{}, fmt.Errorf("destination %s exists and is not a directory", root)
+		}
+		return Plan{}, &UnownedRootError{Root: root}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return Plan{}, fmt.Errorf("inspect destination %s: %w", root, statErr)
+	}
+
+	artifact, err := i.metadata().ResolveSDK(ctx, canonical, rid)
+	if err != nil {
+		return Plan{}, err
+	}
+	return Plan{
+		Version:    artifact.Version,
+		RID:        artifact.RID,
+		Root:       root,
+		DotnetPath: filepath.Join(root, "dotnet"),
+		SourceURL:  artifact.URL,
+		SHA512:     FormatSHA512(artifact.SHA512),
+		FileName:   artifact.FileName,
+	}, nil
+}
+
+// Install acquires the install lock, verifies the archive, and publishes the SDK.
+func (i Installer) Install(ctx context.Context, plan Plan, progress io.Writer) (Result, error) {
+	if progress == nil {
+		progress = io.Discard
+	}
+	parsed, err := ValidateVersion(plan.Version)
+	if err != nil {
+		return Result{}, err
+	}
+	if strings.TrimSpace(plan.RID) == "" {
+		return Result{}, errors.New("runtime identifier is empty")
+	}
+	managedRoot, err := i.managedRoot()
+	if err != nil {
+		return Result{}, err
+	}
+	release, err := acquireLock(ctx, i.lockPath(managedRoot))
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
+
+	manifest, err := Load(i.manifestPath(managedRoot), managedRoot)
+	if err != nil {
+		return Result{}, err
+	}
+	canonical := parsed.String()
+	if entry := manifest.Find(canonical); entry != nil {
+		root := manifest.RootFor(*entry)
+		info, statErr := os.Stat(root)
+		if statErr != nil || !info.IsDir() || !usableRoot(root, canonical) {
+			return Result{}, &StaleInstallError{Version: canonical, Root: root}
+		}
+		result := resultFromEntry(*entry, root, plan.SystemCopy)
+		result.AlreadyInstalled = true
+		return result, nil
+	}
+
+	finalRoot := filepath.Join(managedRoot, canonical)
+	if plan.Root != "" && canonicalPath(plan.Root) != finalRoot {
+		return Result{}, fmt.Errorf("plan destination %s does not match managed root destination %s", plan.Root, finalRoot)
+	}
+	if _, statErr := os.Lstat(finalRoot); statErr == nil {
+		return Result{}, &UnownedRootError{Root: finalRoot}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return Result{}, fmt.Errorf("inspect destination %s: %w", finalRoot, statErr)
+	}
+
+	if plan.SourceURL == "" || plan.SHA512 == "" {
+		artifact, resolveErr := i.metadata().ResolveSDK(ctx, canonical, plan.RID)
+		if resolveErr != nil {
+			return Result{}, resolveErr
+		}
+		plan.SourceURL = artifact.URL
+		plan.SHA512 = FormatSHA512(artifact.SHA512)
+		plan.FileName = artifact.FileName
+	}
+	expected, err := ParseSHA512(plan.SHA512)
+	if err != nil {
+		return Result{}, fmt.Errorf("parse planned checksum: %w", err)
+	}
+
+	downloadParent := filepath.Dir(managedRoot)
+	if err := os.MkdirAll(downloadParent, 0o700); err != nil {
+		return Result{}, fmt.Errorf("create download parent directory: %w", err)
+	}
+	downloadDir, err := os.MkdirTemp(downloadParent, ".hilt-download-")
+	if err != nil {
+		return Result{}, fmt.Errorf("create download directory: %w", err)
+	}
+	defer os.RemoveAll(downloadDir)
+	downloadPath, err := i.download(ctx, plan.SourceURL, expected, downloadDir, progress)
+	if err != nil {
+		return Result{}, err
+	}
+
+	if err := os.MkdirAll(managedRoot, 0o700); err != nil {
+		return Result{}, fmt.Errorf("create managed root: %w", err)
+	}
+	stagingParent := filepath.Join(managedRoot, ".staging")
+	if err := os.MkdirAll(stagingParent, 0o700); err != nil {
+		return Result{}, fmt.Errorf("create staging directory: %w", err)
+	}
+	staging, err := os.MkdirTemp(stagingParent, canonical+"-")
+	if err != nil {
+		return Result{}, fmt.Errorf("create staging root: %w", err)
+	}
+	defer os.RemoveAll(staging)
+
+	progressf(progress, "Extracting %s", valueOr(plan.FileName, "SDK archive"))
+	if err := ExtractTarGz(downloadPath, staging, ExtractLimits{
+		MaxBytes:   i.maxExtractBytes(),
+		MaxEntries: i.maxArchiveEntries(),
+	}); err != nil {
+		return Result{}, fmt.Errorf("extract SDK archive: %w", err)
+	}
+
+	progressf(progress, "Verifying staged toolchain")
+	if err := i.verify(ctx, staging, canonical); err != nil {
+		return Result{}, err
+	}
+
+	if _, statErr := os.Lstat(finalRoot); statErr == nil {
+		return Result{}, &UnownedRootError{Root: finalRoot}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return Result{}, fmt.Errorf("inspect destination %s: %w", finalRoot, statErr)
+	}
+	progressf(progress, "Publishing to %s", finalRoot)
+	if err := os.Rename(staging, finalRoot); err != nil {
+		return Result{}, fmt.Errorf("publish SDK: %w", err)
+	}
+
+	installedAt := i.now().UTC()
+	entry := Entry{
+		Version:     canonical,
+		RID:         plan.RID,
+		Root:        canonical,
+		SourceURL:   plan.SourceURL,
+		SHA512:      FormatSHA512(expected),
+		InstalledAt: installedAt,
+	}
+	if err := manifest.Add(entry); err != nil {
+		_ = os.RemoveAll(finalRoot)
+		return Result{}, err
+	}
+	if err := manifest.Save(); err != nil {
+		rollbackErr := os.RemoveAll(finalRoot)
+		if rollbackErr != nil {
+			return Result{}, fmt.Errorf("write install manifest: %w (also failed to roll back %s: %v)", err, finalRoot, rollbackErr)
+		}
+		return Result{}, fmt.Errorf("write install manifest: %w", err)
+	}
+
+	return Result{
+		Version:     canonical,
+		RID:         plan.RID,
+		Root:        finalRoot,
+		DotnetPath:  filepath.Join(finalRoot, "dotnet"),
+		SourceURL:   plan.SourceURL,
+		SHA512:      FormatSHA512(expected),
+		InstalledAt: installedAt,
+		SystemCopy:  plan.SystemCopy,
+	}, nil
+}
+
+func (i Installer) download(ctx context.Context, rawURL string, expected []byte, directory string, progress io.Writer) (string, error) {
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parse SDK archive URL: %w", err)
+	}
+	if err := i.validator()(target); err != nil {
+		return "", err
+	}
+
+	file, err := os.CreateTemp(directory, "sdk-*.tar.gz")
+	if err != nil {
+		return "", fmt.Errorf("create download file: %w", err)
+	}
+	name := file.Name()
+	success := false
+	defer func() {
+		if !success {
+			_ = file.Close()
+			_ = os.Remove(name)
+		}
+	}()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return "", fmt.Errorf("create SDK download request: %w", err)
+	}
+	request.Header.Set("User-Agent", "hilt")
+	response, err := i.httpClient().Do(request)
+	if err != nil {
+		return "", fmt.Errorf("download SDK archive: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		return "", fmt.Errorf("download SDK archive: %s: %s", response.Status, strings.TrimSpace(string(snippet)))
+	}
+	limit := i.maxDownloadBytes()
+	if response.ContentLength > limit {
+		return "", fmt.Errorf("SDK archive exceeds %d bytes", limit)
+	}
+
+	progressf(progress, "Downloading %s", target.Redacted())
+	hasher := sha512.New()
+	written, err := io.Copy(io.MultiWriter(file, hasher), io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		return "", fmt.Errorf("download SDK archive: %w", err)
+	}
+	if written > limit {
+		return "", fmt.Errorf("SDK archive exceeds %d bytes", limit)
+	}
+	if err := file.Sync(); err != nil {
+		return "", fmt.Errorf("sync SDK archive: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("close SDK archive: %w", err)
+	}
+
+	actual := hasher.Sum(nil)
+	if subtle.ConstantTimeCompare(actual, expected) != 1 {
+		return "", &ChecksumMismatchError{Expected: FormatSHA512(expected), Actual: FormatSHA512(actual)}
+	}
+	success = true
+	progressf(progress, "Downloaded %s", humanBytes(written))
+	progressf(progress, "Verified SHA-512")
+	return name, nil
+}
+
+func (i Installer) verify(ctx context.Context, root, version string) error {
+	runner := i.Runner
+	if runner == nil {
+		runner = process.ExecRunner{}
+	}
+	baseEnv := i.BaseEnv
+	if baseEnv == nil {
+		baseEnv = os.Environ()
+	}
+	env := dotnet.BuildToolchainEnvironment(baseEnv, root)
+	dotnetPath := filepath.Join(root, "dotnet")
+
+	result, err := runner.Run(ctx, process.Spec{
+		Name: dotnetPath,
+		Args: []string{"--list-sdks"},
+		Dir:  root,
+		Env:  env,
+	})
+	if err != nil {
+		return fmt.Errorf("run staged dotnet --list-sdks: %w", err)
+	}
+	sdks, err := dotnet.ParseSDKList(result.Stdout, root)
+	if err != nil {
+		return fmt.Errorf("parse staged dotnet --list-sdks: %w", err)
+	}
+	found := false
+	for _, sdk := range sdks {
+		if sdk.Version == version {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("staged SDK %s did not report itself in --list-sdks", version)
+	}
+
+	result, err = runner.Run(ctx, process.Spec{
+		Name: dotnetPath,
+		Args: []string{"--info"},
+		Dir:  root,
+		Env:  env,
+	})
+	if err != nil {
+		return fmt.Errorf("run staged dotnet --info: %w", err)
+	}
+	info := dotnet.ParseInfo(result.Stdout)
+	if info.Architecture == "" && info.RID == "" {
+		return errors.New("staged dotnet --info did not report host information")
+	}
+	return nil
+}
+
+func (i Installer) managedRoot() (string, error) {
+	root := canonicalPath(i.ManagedRoot)
+	if root == "" {
+		return "", errors.New("managed root is empty")
+	}
+	return root, nil
+}
+
+func (i Installer) manifestPath(managedRoot string) string {
+	if i.ManifestPath != "" {
+		return i.ManifestPath
+	}
+	return filepath.Join(filepath.Dir(managedRoot), "installs.json")
+}
+
+func (i Installer) lockPath(managedRoot string) string {
+	if i.LockPath != "" {
+		return i.LockPath
+	}
+	return filepath.Join(filepath.Dir(managedRoot), "installs.lock")
+}
+
+func (i Installer) metadata() *ReleaseClient {
+	if i.Metadata != nil {
+		return i.Metadata
+	}
+	return &ReleaseClient{}
+}
+
+func (i Installer) httpClient() *http.Client {
+	base := i.HTTPClient
+	if base == nil {
+		base = &http.Client{Transport: defaultTransport()}
+	}
+	client := *base
+	original := client.CheckRedirect
+	validate := i.validator()
+	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if err := validate(request.URL); err != nil {
+			return err
+		}
+		if original != nil {
+			return original(request, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &client
+}
+
+func (i Installer) validator() func(*url.URL) error {
+	if i.ValidateURL != nil {
+		return i.ValidateURL
+	}
+	return ValidateMicrosoftURL
+}
+
+func (i Installer) maxDownloadBytes() int64 {
+	if i.MaxDownloadBytes > 0 {
+		return i.MaxDownloadBytes
+	}
+	return defaultMaxDownloadBytes
+}
+
+func (i Installer) maxExtractBytes() int64 {
+	if i.MaxExtractBytes > 0 {
+		return i.MaxExtractBytes
+	}
+	return defaultMaxExtractBytes
+}
+
+func (i Installer) maxArchiveEntries() int {
+	if i.MaxArchiveEntries > 0 {
+		return i.MaxArchiveEntries
+	}
+	return defaultMaxArchiveEntries
+}
+
+func (i Installer) now() time.Time {
+	if i.Now != nil {
+		return i.Now()
+	}
+	return time.Now()
+}
+
+func usableRoot(root, version string) bool {
+	dotnetInfo, err := os.Stat(filepath.Join(root, "dotnet"))
+	if err != nil || dotnetInfo.IsDir() || dotnetInfo.Mode()&0o111 == 0 {
+		return false
+	}
+	sdkInfo, err := os.Stat(filepath.Join(root, "sdk", version))
+	return err == nil && sdkInfo.IsDir()
+}
+
+func planFromEntry(entry Entry, root string, installed bool) Plan {
+	return Plan{
+		Version:          entry.Version,
+		RID:              entry.RID,
+		Root:             root,
+		DotnetPath:       filepath.Join(root, "dotnet"),
+		SourceURL:        entry.SourceURL,
+		SHA512:           entry.SHA512,
+		AlreadyInstalled: installed,
+	}
+}
+
+func resultFromEntry(entry Entry, root string, systemCopy bool) Result {
+	return Result{
+		Version:     entry.Version,
+		RID:         entry.RID,
+		Root:        root,
+		DotnetPath:  filepath.Join(root, "dotnet"),
+		SourceURL:   entry.SourceURL,
+		SHA512:      entry.SHA512,
+		InstalledAt: entry.InstalledAt,
+		SystemCopy:  systemCopy,
+	}
+}
+
+func progressf(writer io.Writer, format string, args ...any) {
+	if writer == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(writer, format+"\n", args...)
+}
+
+func humanBytes(value int64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	divisor, exponent := int64(unit), 0
+	for quotient := value / unit; quotient >= unit; quotient /= unit {
+		divisor *= unit
+		exponent++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(value)/float64(divisor), "KMGTPE"[exponent])
+}
+
+func valueOr(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
