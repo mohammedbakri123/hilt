@@ -192,6 +192,25 @@ func printRemoval(writer io.Writer, removal install.Removal) {
 	fmt.Fprintf(writer, "Removed .NET SDK %s from %s\n", removal.Version, removal.Root)
 }
 
+func printUpdates(writer io.Writer, updates []install.Update) {
+	if len(updates) == 0 {
+		fmt.Fprintln(writer, "No managed .NET SDKs installed.")
+		return
+	}
+	available := false
+	for _, update := range updates {
+		if !update.UpdateAvailable {
+			continue
+		}
+		available = true
+		fmt.Fprintf(writer, "SDK %s -> %s\n", update.Version, update.LatestVersion)
+		fmt.Fprintf(writer, "  %s\n", update.Root)
+	}
+	if !available {
+		fmt.Fprintln(writer, "All managed .NET SDKs are up to date.")
+	}
+}
+
 func sourceName(inventory dotnet.Inventory, root string, source dotnet.Source) string {
 	if source != "" {
 		return string(source)

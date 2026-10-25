@@ -29,6 +29,8 @@ type fakeBackend struct {
 	installErr    error
 	removal       install.Removal
 	removeErr     error
+	updates       []install.Update
+	updatesErr    error
 	report        diagnostics.Report
 }
 
@@ -56,6 +58,9 @@ func (f fakeBackend) InstallSDK(_ context.Context, _ install.Plan, progress io.W
 }
 func (f fakeBackend) RemoveSDK(context.Context, string) (install.Removal, error) {
 	return f.removal, f.removeErr
+}
+func (f fakeBackend) CheckSDKUpdates(context.Context) ([]install.Update, error) {
+	return f.updates, f.updatesErr
 }
 func (f fakeBackend) Diagnose(context.Context) diagnostics.Report { return f.report }
 func (f fakeBackend) Tool(string) (string, bool)                  { return "", false }
@@ -655,5 +660,71 @@ func TestSDKRemoveErrors(t *testing.T) {
 	failed := run(t, []string{"sdk", "remove", "10.0.112"}, backend, false, nil)
 	if failed.code != 1 || !strings.Contains(failed.stderr, "refusing to remove system SDK") {
 		t.Errorf("remove failure = %d %q", failed.code, failed.stderr)
+	}
+}
+
+func TestSDKOutdatedHuman(t *testing.T) {
+	backend := populatedBackend()
+	backend.updates = []install.Update{
+		{Version: "10.0.100", LatestVersion: "10.0.102", Root: "/managed/10.0.100", UpdateAvailable: true},
+		{Version: "9.0.100", LatestVersion: "9.0.100", Root: "/managed/9.0.100"},
+	}
+	result := run(t, []string{"sdk", "outdated"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"SDK 10.0.100 -> 10.0.102", "/managed/10.0.100"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+	if strings.Contains(result.stdout, "9.0.100") {
+		t.Errorf("up-to-date SDK listed as an update:\n%s", result.stdout)
+	}
+}
+
+func TestSDKOutdatedUpToDate(t *testing.T) {
+	backend := populatedBackend()
+	backend.updates = []install.Update{{Version: "10.0.100", LatestVersion: "10.0.100", Root: "/managed/10.0.100"}}
+	result := run(t, []string{"sdk", "outdated"}, backend, false, nil)
+	if result.code != 0 || !strings.Contains(result.stdout, "up to date") {
+		t.Errorf("result = %d %q", result.code, result.stdout)
+	}
+}
+
+func TestSDKOutdatedNoManagedSDKs(t *testing.T) {
+	result := run(t, []string{"sdk", "outdated"}, populatedBackend(), false, nil)
+	if result.code != 0 || !strings.Contains(result.stdout, "No managed .NET SDKs installed") {
+		t.Errorf("result = %d %q", result.code, result.stdout)
+	}
+}
+
+func TestSDKOutdatedJSON(t *testing.T) {
+	backend := populatedBackend()
+	backend.updates = []install.Update{
+		{Version: "10.0.100", LatestVersion: "10.0.102", RID: "linux-x64", Root: "/managed/10.0.100", UpdateAvailable: true},
+	}
+	result := run(t, []string{"sdk", "outdated", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	var payload struct {
+		SchemaVersion int              `json:"schemaVersion"`
+		Updates       []install.Update `json:"updates"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, result.stdout)
+	}
+	if payload.SchemaVersion != 1 || len(payload.Updates) != 1 || payload.Updates[0].LatestVersion != "10.0.102" {
+		t.Errorf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestSDKOutdatedErrors(t *testing.T) {
+	backend := populatedBackend()
+	backend.updatesErr = errors.New("metadata unavailable")
+	result := run(t, []string{"sdk", "outdated"}, backend, false, nil)
+	if result.code != 1 || !strings.Contains(result.stderr, "metadata unavailable") {
+		t.Errorf("result = %d %q", result.code, result.stderr)
 	}
 }

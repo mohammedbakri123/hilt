@@ -202,6 +202,11 @@ func (a *App) removalError(ctx context.Context, version string, cause error) err
 	return cause
 }
 
+// CheckSDKUpdates checks manifest-owned SDKs for newer stable releases.
+func (a *App) CheckSDKUpdates(ctx context.Context) ([]install.Update, error) {
+	return a.installer().CheckUpdates(ctx)
+}
+
 func (a *App) installer() install.Installer {
 	return install.Installer{
 		ManagedRoot:  a.config.ManagedRoot,

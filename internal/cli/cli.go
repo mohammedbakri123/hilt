@@ -29,6 +29,7 @@ type Backend interface {
 	PlanSDKInstall(ctx context.Context, version string) (install.Plan, error)
 	InstallSDK(ctx context.Context, plan install.Plan, progress io.Writer) (install.Result, error)
 	RemoveSDK(ctx context.Context, version string) (install.Removal, error)
+	CheckSDKUpdates(ctx context.Context) ([]install.Update, error)
 	Diagnose(ctx context.Context) diagnostics.Report
 	Tool(name string) (string, bool)
 }
@@ -263,6 +264,7 @@ func newSDKCommand(options Options) *cobra.Command {
 	command.AddCommand(newSDKWhichCommand(options))
 	command.AddCommand(newSDKInstallCommand(options))
 	command.AddCommand(newSDKRemoveCommand(options))
+	command.AddCommand(newSDKOutdatedCommand(options))
 	return command
 }
 
@@ -344,6 +346,40 @@ func newSDKRemoveCommand(options Options) *cobra.Command {
 				}{SchemaVersion: schemaVersion, Removal: removal})
 			}
 			printRemoval(options.Out, removal)
+			return nil
+		},
+	}
+	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
+	return command
+}
+
+func newSDKOutdatedCommand(options Options) *cobra.Command {
+	var asJSON bool
+	command := &cobra.Command{
+		Use:   "outdated",
+		Short: "Check managed .NET SDKs for updates",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.Context().Err(); err != nil {
+				return &exitError{code: 130, err: err}
+			}
+			updates, err := options.Backend.CheckSDKUpdates(cmd.Context())
+			if err != nil {
+				if cmd.Context().Err() != nil {
+					return &exitError{code: 130, err: err}
+				}
+				return failure(err)
+			}
+			if updates == nil {
+				updates = []install.Update{}
+			}
+			if asJSON {
+				return writeJSON(options.Out, struct {
+					SchemaVersion int              `json:"schemaVersion"`
+					Updates       []install.Update `json:"updates"`
+				}{SchemaVersion: schemaVersion, Updates: updates})
+			}
+			printUpdates(options.Out, updates)
 			return nil
 		},
 	}
