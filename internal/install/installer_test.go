@@ -69,8 +69,11 @@ func (s *installServer) requestCounts() (int, int) {
 
 type fakeRunner struct {
 	version string
-	mu      sync.Mutex
-	calls   []process.Spec
+	// runtimeVersions lists the (framework, version) pairs reported for
+	// --list-runtimes. Empty makes the command produce no output.
+	runtimeVersions []string
+	mu              sync.Mutex
+	calls           []process.Spec
 }
 
 func (f *fakeRunner) Run(_ context.Context, spec process.Spec) (process.Result, error) {
@@ -83,6 +86,12 @@ func (f *fakeRunner) Run(_ context.Context, spec process.Spec) (process.Result, 
 	switch spec.Args[0] {
 	case "--list-sdks":
 		return process.Result{Stdout: []byte(fmt.Sprintf("%s [%s]\n", f.version, spec.Dir))}, nil
+	case "--list-runtimes":
+		var lines strings.Builder
+		for _, framework := range f.runtimeVersions {
+			fmt.Fprintf(&lines, "%s %s [%s/opt/hostedtaskcache/dotnet/shared/%s/%s]\n", framework, f.version, spec.Dir, framework, f.version)
+		}
+		return process.Result{Stdout: []byte(lines.String())}, nil
 	case "--info":
 		return process.Result{Stdout: []byte("Architecture: x64\nRID: linux-x64\n")}, nil
 	default:

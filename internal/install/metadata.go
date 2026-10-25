@@ -44,9 +44,11 @@ type releaseMetadata struct {
 }
 
 type release struct {
-	ReleaseVersion string       `json:"release-version"`
-	SDK            *sdkRelease  `json:"sdk"`
-	SDKs           []sdkRelease `json:"sdks"`
+	ReleaseVersion    string       `json:"release-version"`
+	Runtime           *sdkRelease  `json:"runtime"`
+	ASPNETCoreRuntime *sdkRelease  `json:"aspnetcore-runtime"`
+	SDK               *sdkRelease  `json:"sdk"`
+	SDKs              []sdkRelease `json:"sdks"`
 }
 
 type sdkRelease struct {
@@ -61,34 +63,60 @@ type releaseFile struct {
 	Hash string `json:"hash"`
 }
 
+// Runtime archive products accepted by ResolveRuntime.
+const (
+	// RuntimeArchiveRuntime is the base .NET runtime archive. It supplies
+	// Microsoft.NETCore.App only.
+	RuntimeArchiveRuntime = "runtime"
+	// RuntimeArchiveASPNETCore is the ASP.NET Core runtime archive. It normally
+	// supplies Microsoft.AspNetCore.App and Microsoft.NETCore.App.
+	RuntimeArchiveASPNETCore = "aspnetcore-runtime"
+)
+
 // VersionNotFoundError reports a version absent from a release channel.
 type VersionNotFoundError struct {
+	Product string
 	Version string
 	Channel string
 }
 
 func (e *VersionNotFoundError) Error() string {
-	return fmt.Sprintf("SDK %s was not found in the .NET %s release metadata", e.Version, e.Channel)
+	return fmt.Sprintf("%s %s was not found in the .NET %s release metadata", metadataProductLabel(e.Product), e.Version, e.Channel)
 }
 
 // RIDNotFoundError reports a missing archive for the host runtime identifier.
 type RIDNotFoundError struct {
+	Product string
 	Version string
 	RID     string
 }
 
 func (e *RIDNotFoundError) Error() string {
-	return fmt.Sprintf("SDK %s has no .tar.gz archive for %s", e.Version, e.RID)
+	return fmt.Sprintf("%s %s has no .tar.gz archive for %s", metadataProductLabel(e.Product), e.Version, e.RID)
 }
 
 // ChecksumMissingError reports metadata without a SHA-512 hash.
 type ChecksumMissingError struct {
+	Product string
 	Version string
 	RID     string
 }
 
 func (e *ChecksumMissingError) Error() string {
-	return fmt.Sprintf("SDK %s for %s has no SHA-512 checksum", e.Version, e.RID)
+	return fmt.Sprintf("%s %s for %s has no SHA-512 checksum", metadataProductLabel(e.Product), e.Version, e.RID)
+}
+
+// metadataProductLabel renders an archive product for diagnostics. An empty
+// product keeps the historical SDK wording.
+func metadataProductLabel(product string) string {
+	switch product {
+	case RuntimeArchiveRuntime:
+		return "runtime"
+	case RuntimeArchiveASPNETCore:
+		return "ASP.NET Core runtime"
+	default:
+		return "SDK"
+	}
 }
 
 // ErrChecksumMismatch is returned when a downloaded archive does not match its
@@ -174,6 +202,82 @@ func (c *ReleaseClient) LatestSDK(ctx context.Context, version string) (dotnet.V
 	return latest, nil
 }
 
+// ResolveRuntime returns the archive metadata for an exact runtime version,
+// archive product, and RID. Product is RuntimeArchiveRuntime or
+// RuntimeArchiveASPNETCore.
+func (c *ReleaseClient) ResolveRuntime(ctx context.Context, version, product, rid string) (Artifact, error) {
+	parsed, err := ValidateVersion(version)
+	if err != nil {
+		return Artifact{}, err
+	}
+	if rid == "" {
+		return Artifact{}, errors.New("runtime identifier is empty")
+	}
+	if product != RuntimeArchiveRuntime && product != RuntimeArchiveASPNETCore {
+		return Artifact{}, fmt.Errorf("unknown runtime archive product %q", product)
+	}
+
+	channel := Channel(parsed)
+	metadata, err := c.channelMetadata(ctx, parsed)
+	if err != nil {
+		return Artifact{}, err
+	}
+	archive := metadata.findRuntimeProduct(product, parsed.String())
+	if archive == nil {
+		return Artifact{}, &VersionNotFoundError{Product: product, Version: parsed.String(), Channel: channel}
+	}
+	file, ok := archive.findArchive(rid)
+	if !ok {
+		return Artifact{}, &RIDNotFoundError{Product: product, Version: parsed.String(), RID: rid}
+	}
+	if strings.TrimSpace(file.Hash) == "" {
+		return Artifact{}, &ChecksumMissingError{Product: product, Version: parsed.String(), RID: rid}
+	}
+	hash, err := ParseSHA512(file.Hash)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("parse checksum for %s %s: %w", metadataProductLabel(product), parsed.String(), err)
+	}
+	archiveURL, err := url.Parse(file.URL)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("parse %s archive URL: %w", metadataProductLabel(product), err)
+	}
+	if err := c.validator()(archiveURL); err != nil {
+		return Artifact{}, err
+	}
+	fileName := strings.TrimSpace(file.Name)
+	if fileName == "" {
+		fileName = path.Base(archiveURL.Path)
+	}
+	return Artifact{
+		Version:  parsed.String(),
+		RID:      rid,
+		URL:      archiveURL.String(),
+		FileName: fileName,
+		SHA512:   hash,
+	}, nil
+}
+
+// LatestRuntime returns the newest stable runtime version for an archive
+// product in the same release channel.
+func (c *ReleaseClient) LatestRuntime(ctx context.Context, version, product string) (dotnet.Version, error) {
+	parsed, err := ValidateVersion(version)
+	if err != nil {
+		return dotnet.Version{}, err
+	}
+	if product != RuntimeArchiveRuntime && product != RuntimeArchiveASPNETCore {
+		return dotnet.Version{}, fmt.Errorf("unknown runtime archive product %q", product)
+	}
+	metadata, err := c.channelMetadata(ctx, parsed)
+	if err != nil {
+		return dotnet.Version{}, err
+	}
+	latest, ok := metadata.latestRuntime(product, parsed)
+	if !ok {
+		return dotnet.Version{}, &VersionNotFoundError{Product: product, Version: parsed.String(), Channel: Channel(parsed)}
+	}
+	return latest, nil
+}
+
 func (c *ReleaseClient) channelMetadata(ctx context.Context, version dotnet.Version) (releaseMetadata, error) {
 	channel := Channel(version)
 	baseURL := strings.TrimRight(c.BaseURL, "/")
@@ -240,6 +344,50 @@ func (m releaseMetadata) findSDK(version string) *sdkRelease {
 		}
 	}
 	return nil
+}
+
+// productRelease returns the release entry for a runtime archive product. An
+// unknown product yields nil.
+func (r release) productRelease(product string) *sdkRelease {
+	switch product {
+	case RuntimeArchiveRuntime:
+		return r.Runtime
+	case RuntimeArchiveASPNETCore:
+		return r.ASPNETCoreRuntime
+	default:
+		return nil
+	}
+}
+
+func (m releaseMetadata) findRuntimeProduct(product, version string) *sdkRelease {
+	for index := range m.Releases {
+		current := &m.Releases[index]
+		entry := current.productRelease(product)
+		if entry != nil && entry.Version == version {
+			return entry
+		}
+	}
+	return nil
+}
+
+func (m releaseMetadata) latestRuntime(product string, reference dotnet.Version) (dotnet.Version, bool) {
+	var latest dotnet.Version
+	found := false
+	for _, release := range m.Releases {
+		entry := release.productRelease(product)
+		if entry == nil {
+			continue
+		}
+		candidate, err := ValidateVersion(entry.Version)
+		if err != nil || candidate.Major != reference.Major || candidate.Minor != reference.Minor {
+			continue
+		}
+		if !found || candidate.Compare(latest) > 0 {
+			latest = candidate
+			found = true
+		}
+	}
+	return latest, found
 }
 
 func (s sdkRelease) findArchive(rid string) (releaseFile, bool) {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -53,13 +54,14 @@ type Result struct {
 	SystemCopy       bool      `json:"systemCopy,omitempty"`
 }
 
-// Removal describes a completed managed SDK removal.
+// Removal describes a completed managed SDK or runtime removal.
 type Removal struct {
-	Version   string    `json:"version"`
-	RID       string    `json:"rid,omitempty"`
-	Root      string    `json:"root"`
-	Stale     bool      `json:"stale"`
-	RemovedAt time.Time `json:"removedAt"`
+	Product   ProductKind `json:"product,omitempty"`
+	Version   string      `json:"version"`
+	RID       string      `json:"rid,omitempty"`
+	Root      string      `json:"root"`
+	Stale     bool        `json:"stale"`
+	RemovedAt time.Time   `json:"removedAt"`
 }
 
 // UnownedRootError reports a destination that exists without a manifest entry.
@@ -73,34 +75,45 @@ func (e *UnownedRootError) Error() string {
 
 // NotOwnedError reports a managed root that is not recorded in the manifest.
 type NotOwnedError struct {
+	Product ProductKind
 	Version string
 	Root    string
 }
 
 func (e *NotOwnedError) Error() string {
-	return fmt.Sprintf("SDK %s at %s is not recorded in Hilt's install manifest; refusing to remove it", e.Version, e.Root)
+	return fmt.Sprintf("%s %s at %s is not recorded in Hilt's install manifest; refusing to remove it", productLabel(e.Product), e.Version, e.Root)
 }
 
-// NotInstalledError reports an SDK with no manifest entry and no managed root.
+// NotInstalledError reports a product with no manifest entry and no managed root.
 type NotInstalledError struct {
+	Product ProductKind
 	Version string
 }
 
 func (e *NotInstalledError) Error() string {
-	return fmt.Sprintf("SDK %s is not installed in Hilt's managed root", e.Version)
+	return fmt.Sprintf("%s %s is not installed in Hilt's managed root", productLabel(e.Product), e.Version)
 }
 
 // StaleInstallError reports a manifest entry whose root is missing.
 type StaleInstallError struct {
+	Product ProductKind
 	Version string
 	Root    string
 }
 
 func (e *StaleInstallError) Error() string {
-	return fmt.Sprintf("install manifest records SDK %s at %s, but that directory is missing", e.Version, e.Root)
+	return fmt.Sprintf("install manifest records %s %s at %s, but that directory is missing", productLabel(e.Product), e.Version, e.Root)
 }
 
-// Installer downloads, verifies, and publishes managed SDKs.
+// productLabel renders a product kind with an SDK fallback for omitted kinds.
+func productLabel(product ProductKind) string {
+	if product == ProductRuntime {
+		return "runtime"
+	}
+	return "SDK"
+}
+
+// Installer downloads, verifies, and publishes managed SDKs and runtimes.
 type Installer struct {
 	ManagedRoot       string
 	ManifestPath      string
@@ -115,6 +128,19 @@ type Installer struct {
 	MaxArchiveEntries int
 	RemoveAll         func(string) error
 	Now               func() time.Time
+	// FindHost resolves a fallback dotnet host used to verify staged runtimes
+	// that do not ship their own host.
+	FindHost func() (string, bool)
+}
+
+func (i Installer) host() (string, bool) {
+	if i.FindHost != nil {
+		return i.FindHost()
+	}
+	if path, err := exec.LookPath("dotnet"); err == nil {
+		return path, true
+	}
+	return "", false
 }
 
 // Plan resolves metadata and checks for an existing installation.
@@ -309,7 +335,7 @@ func (i Installer) Install(ctx context.Context, plan Plan, progress io.Writer) (
 		return Result{}, fmt.Errorf("create download directory: %w", err)
 	}
 	defer os.RemoveAll(downloadDir)
-	downloadPath, err := i.download(ctx, plan.SourceURL, expected, downloadDir, progress)
+	downloadPath, err := i.download(ctx, plan.SourceURL, expected, downloadDir, progress, "SDK")
 	if err != nil {
 		return Result{}, err
 	}
@@ -435,6 +461,7 @@ func (i Installer) Remove(ctx context.Context, version string) (Removal, error) 
 			return Removal{}, fmt.Errorf("remove stale SDK manifest entry: %w", err)
 		}
 		return Removal{
+			Product:   ProductSDK,
 			Version:   canonical,
 			RID:       entry.RID,
 			Root:      root,
@@ -467,6 +494,7 @@ func (i Installer) Remove(ctx context.Context, version string) (Removal, error) 
 		return Removal{}, fmt.Errorf("remove SDK from install manifest: %w", err)
 	}
 	return Removal{
+		Product:   ProductSDK,
 		Version:   canonical,
 		RID:       entry.RID,
 		Root:      root,
@@ -474,16 +502,16 @@ func (i Installer) Remove(ctx context.Context, version string) (Removal, error) 
 	}, nil
 }
 
-func (i Installer) download(ctx context.Context, rawURL string, expected []byte, directory string, progress io.Writer) (string, error) {
+func (i Installer) download(ctx context.Context, rawURL string, expected []byte, directory string, progress io.Writer, label string) (string, error) {
 	target, err := url.Parse(rawURL)
 	if err != nil {
-		return "", fmt.Errorf("parse SDK archive URL: %w", err)
+		return "", fmt.Errorf("parse %s archive URL: %w", label, err)
 	}
 	if err := i.validator()(target); err != nil {
 		return "", err
 	}
 
-	file, err := os.CreateTemp(directory, "sdk-*.tar.gz")
+	file, err := os.CreateTemp(directory, "archive-*.tar.gz")
 	if err != nil {
 		return "", fmt.Errorf("create download file: %w", err)
 	}
@@ -498,37 +526,37 @@ func (i Installer) download(ctx context.Context, rawURL string, expected []byte,
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return "", fmt.Errorf("create SDK download request: %w", err)
+		return "", fmt.Errorf("create %s download request: %w", label, err)
 	}
 	request.Header.Set("User-Agent", "hilt")
 	response, err := i.httpClient().Do(request)
 	if err != nil {
-		return "", fmt.Errorf("download SDK archive: %w", err)
+		return "", fmt.Errorf("download %s archive: %w", label, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		snippet, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-		return "", fmt.Errorf("download SDK archive: %s: %s", response.Status, strings.TrimSpace(string(snippet)))
+		return "", fmt.Errorf("download %s archive: %s: %s", label, response.Status, strings.TrimSpace(string(snippet)))
 	}
 	limit := i.maxDownloadBytes()
 	if response.ContentLength > limit {
-		return "", fmt.Errorf("SDK archive exceeds %d bytes", limit)
+		return "", fmt.Errorf("%s archive exceeds %d bytes", label, limit)
 	}
 
 	progressf(progress, "Downloading %s", target.Redacted())
 	hasher := sha512.New()
 	written, err := io.Copy(io.MultiWriter(file, hasher), io.LimitReader(response.Body, limit+1))
 	if err != nil {
-		return "", fmt.Errorf("download SDK archive: %w", err)
+		return "", fmt.Errorf("download %s archive: %w", label, err)
 	}
 	if written > limit {
-		return "", fmt.Errorf("SDK archive exceeds %d bytes", limit)
+		return "", fmt.Errorf("%s archive exceeds %d bytes", label, limit)
 	}
 	if err := file.Sync(); err != nil {
-		return "", fmt.Errorf("sync SDK archive: %w", err)
+		return "", fmt.Errorf("sync %s archive: %w", label, err)
 	}
 	if err := file.Close(); err != nil {
-		return "", fmt.Errorf("close SDK archive: %w", err)
+		return "", fmt.Errorf("close %s archive: %w", label, err)
 	}
 
 	actual := hasher.Sum(nil)
@@ -694,6 +722,24 @@ func usableRoot(root, version string) bool {
 	}
 	sdkInfo, err := os.Stat(filepath.Join(root, "sdk", version))
 	return err == nil && sdkInfo.IsDir()
+}
+
+// usableRuntimeRoot statically checks that every recorded framework directory
+// exists under <root>/shared/<framework>/<version>.
+func usableRuntimeRoot(root, version string, frameworks []string) bool {
+	if len(frameworks) == 0 {
+		return false
+	}
+	for _, framework := range frameworks {
+		if strings.ContainsRune(framework, '/') {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(root, "shared", framework, version))
+		if err != nil || !info.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 func planFromEntry(entry Entry, root string, installed bool) Plan {

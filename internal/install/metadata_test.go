@@ -197,3 +197,116 @@ func TestLatestSDKMissingStableVersion(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestResolveRuntime(t *testing.T) {
+	hash := sha512.Sum512([]byte("runtime archive"))
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/10.0/releases.json" {
+			http.NotFound(writer, request)
+			return
+		}
+		fmt.Fprintf(writer, `{"releases":[
+			{"runtime":{"version":"10.0.12","files":[{"name":"dotnet-runtime-10.0.12-linux-x64.tar.gz","rid":"linux-x64","url":"%s/archive-runtime.tar.gz","hash":"%s"}]}},
+			{"aspnetcore-runtime":{"version":"10.0.12","files":[{"name":"dotnet-aspnetcore-runtime-10.0.12-linux-x64.tar.gz","rid":"linux-x64","url":"%s/archive-aspnetcore.tar.gz","hash":"%s"}]}}
+		]}`, server.URL, FormatSHA512(hash[:]), server.URL, FormatSHA512(hash[:]))
+	}))
+	defer server.Close()
+
+	client := &ReleaseClient{BaseURL: server.URL, HTTPClient: server.Client(), ValidateURL: allowTestURL}
+	artifact, err := client.ResolveRuntime(context.Background(), "10.0.12", RuntimeArchiveRuntime, "linux-x64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.URL != server.URL+"/archive-runtime.tar.gz" || artifact.FileName != "dotnet-runtime-10.0.12-linux-x64.tar.gz" {
+		t.Errorf("runtime artifact = %+v", artifact)
+	}
+	if FormatSHA512(artifact.SHA512) != FormatSHA512(hash[:]) {
+		t.Errorf("SHA512 = %s", FormatSHA512(artifact.SHA512))
+	}
+	aspnetcore, err := client.ResolveRuntime(context.Background(), "10.0.12", RuntimeArchiveASPNETCore, "linux-x64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aspnetcore.URL != server.URL+"/archive-aspnetcore.tar.gz" || aspnetcore.FileName != "dotnet-aspnetcore-runtime-10.0.12-linux-x64.tar.gz" {
+		t.Errorf("aspnetcore artifact = %+v", aspnetcore)
+	}
+}
+
+func TestResolveRuntimeErrors(t *testing.T) {
+	hash := sha512.Sum512([]byte("runtime archive"))
+	tests := []struct {
+		name    string
+		product string
+		want    string
+	}{
+		{name: "unknown product", product: "sdk", want: `unknown runtime archive product "sdk"`},
+		{name: "missing product in metadata", product: RuntimeArchiveRuntime, want: "runtime 10.0.12 was not found"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"releases":[{"sdk":{"version":"10.0.100"}}]}`
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				_, _ = writer.Write([]byte(body))
+			}))
+			defer server.Close()
+			client := &ReleaseClient{BaseURL: server.URL, HTTPClient: server.Client(), ValidateURL: allowTestURL}
+			_, err := client.ResolveRuntime(context.Background(), "10.0.12", test.product, "linux-x64")
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+
+	ridBody := fmt.Sprintf(`{"releases":[{"runtime":{"version":"10.0.12","files":[{"name":"dotnet-runtime-10.0.12-linux-x64.tar.gz","rid":"linux-x64","url":"https://a.microsoft.com/r.tar.gz","hash":"%s"}]}}]}`, FormatSHA512(hash[:]))
+	ridServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(ridBody))
+	}))
+	defer ridServer.Close()
+	ridClient := &ReleaseClient{BaseURL: ridServer.URL, HTTPClient: ridServer.Client(), ValidateURL: allowTestURL}
+	if _, err := ridClient.ResolveRuntime(context.Background(), "10.0.12", RuntimeArchiveRuntime, "linux-arm64"); err == nil || !strings.Contains(err.Error(), "no .tar.gz archive") {
+		t.Fatalf("rid error = %v", err)
+	}
+
+	noHashBody := `{"releases":[{"runtime":{"version":"10.0.12","files":[{"name":"dotnet-runtime-10.0.12-linux-x64.tar.gz","rid":"linux-x64","url":"https://a.microsoft.com/r.tar.gz"}]}}]}`
+	noHashServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(noHashBody))
+	}))
+	defer noHashServer.Close()
+	noHashClient := &ReleaseClient{BaseURL: noHashServer.URL, HTTPClient: noHashServer.Client(), ValidateURL: allowTestURL}
+	if _, err := noHashClient.ResolveRuntime(context.Background(), "10.0.12", RuntimeArchiveRuntime, "linux-x64"); err == nil || !strings.Contains(err.Error(), "no SHA-512 checksum") {
+		t.Fatal("wanted checksum missing error")
+	}
+}
+
+func TestLatestRuntime(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/10.0/releases.json" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"releases":[
+			{"runtime":{"version":"10.0.12"}},
+			{"runtimes":[{"version":"10.0.13"},{"version":"10.0.14-rc.1"}]},
+			{"runtime":{"version":"10.0.15"}},
+			{"sdk":{"version":"10.0.200"}},
+			{"aspnetcore-runtime":{"version":"10.0.13"}}
+		]}`))
+	}))
+	defer server.Close()
+	client := &ReleaseClient{BaseURL: server.URL, HTTPClient: server.Client(), ValidateURL: allowTestURL}
+	latest, err := client.LatestRuntime(context.Background(), "10.0.12", RuntimeArchiveRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.String() != "10.0.15" {
+		t.Errorf("runtime latest = %s, want 10.0.15", latest)
+	}
+	aspnetcore, err := client.LatestRuntime(context.Background(), "10.0.12", RuntimeArchiveASPNETCore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aspnetcore.String() != "10.0.13" {
+		t.Errorf("aspnetcore latest = %s, want 10.0.13", aspnetcore)
+	}
+}
