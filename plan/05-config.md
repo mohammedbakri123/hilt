@@ -41,10 +41,14 @@ func (Store) Save(Config) error
 
 - Missing file returns defaults and no warnings. It is not created until a
   save is requested.
-- Malformed JSON or an unsupported newer schema:
+- Malformed JSON:
   - returns defaults;
   - renames the bad file to `config.json.corrupt-<unix-timestamp>`;
   - returns a warning describing both actions.
+- An unsupported newer schema:
+  - returns defaults;
+  - leaves the file untouched and reports its path in the warning, so a newer
+    Hilt version cannot lose settings.
 - Unknown JSON fields are preserved on save where practical; Hilt must not
   silently discard settings it does not understand.
 - Saves are atomic: write a mode-`0600` temp file in the same directory, sync,
