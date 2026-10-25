@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,6 +122,45 @@ func (a *App) Tool(name string) (string, bool) {
 // Inventory discovers .NET hosts, SDKs, and runtimes.
 func (a *App) Inventory(ctx context.Context) (dotnet.Inventory, error) {
 	return dotnet.Discover(ctx, a.locator, a.prober, os.Stat), nil
+}
+
+// PlanSDKInstall resolves a managed SDK install without downloading it.
+func (a *App) PlanSDKInstall(ctx context.Context, version string) (install.Plan, error) {
+	plan, err := a.installer().Plan(ctx, version)
+	if err != nil {
+		return install.Plan{}, err
+	}
+	inventory, inventoryErr := a.Inventory(ctx)
+	if inventoryErr == nil {
+		for _, sdk := range inventory.SDKs {
+			if sdk.Version == plan.Version && !sdk.Managed {
+				plan.SystemCopy = true
+				break
+			}
+		}
+	}
+	return plan, nil
+}
+
+// InstallSDK downloads, verifies, and publishes a managed SDK.
+func (a *App) InstallSDK(ctx context.Context, plan install.Plan, progress io.Writer) (install.Result, error) {
+	result, err := a.installer().Install(ctx, plan, progress)
+	if err != nil {
+		return install.Result{}, err
+	}
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+		a.locator.Ownership = manifest
+	}
+	return result, nil
+}
+
+func (a *App) installer() install.Installer {
+	return install.Installer{
+		ManagedRoot:  a.config.ManagedRoot,
+		ManifestPath: a.paths.InstallManifestFile(),
+		LockPath:     a.paths.InstallLockFile(),
+		Runner:       a.runner,
+	}
 }
 
 // Resolve selects the toolchain Hilt will use for the current workspace.

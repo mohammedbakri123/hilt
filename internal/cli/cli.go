@@ -12,6 +12,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 )
 
@@ -25,6 +26,8 @@ type Backend interface {
 	PackageManager() *platform.PackageManager
 	Inventory(ctx context.Context) (dotnet.Inventory, error)
 	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
+	PlanSDKInstall(ctx context.Context, version string) (install.Plan, error)
+	InstallSDK(ctx context.Context, plan install.Plan, progress io.Writer) (install.Result, error)
 	Diagnose(ctx context.Context) diagnostics.Report
 	Tool(name string) (string, bool)
 }
@@ -257,6 +260,58 @@ func newSDKCommand(options Options) *cobra.Command {
 	}
 	command.AddCommand(newInventoryListCommand(options, inventorySDKs, "list", "List installed .NET SDKs"))
 	command.AddCommand(newSDKWhichCommand(options))
+	command.AddCommand(newSDKInstallCommand(options))
+	return command
+}
+
+func newSDKInstallCommand(options Options) *cobra.Command {
+	var asJSON bool
+	command := &cobra.Command{
+		Use:   "install <version>",
+		Short: "Install a managed .NET SDK",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.Context().Err(); err != nil {
+				return &exitError{code: 130, err: err}
+			}
+			if _, err := install.ValidateVersion(args[0]); err != nil {
+				return usageError(err.Error())
+			}
+			plan, err := options.Backend.PlanSDKInstall(cmd.Context(), args[0])
+			if err != nil {
+				if cmd.Context().Err() != nil {
+					return &exitError{code: 130, err: err}
+				}
+				return failure(err)
+			}
+
+			if asJSON {
+				result, err := options.Backend.InstallSDK(cmd.Context(), plan, io.Discard)
+				if err != nil {
+					if cmd.Context().Err() != nil {
+						return &exitError{code: 130, err: err}
+					}
+					return failure(err)
+				}
+				return writeJSON(options.Out, struct {
+					SchemaVersion int            `json:"schemaVersion"`
+					Install       install.Result `json:"install"`
+				}{SchemaVersion: schemaVersion, Install: result})
+			}
+
+			printInstallPlan(options.Out, plan)
+			result, err := options.Backend.InstallSDK(cmd.Context(), plan, options.Err)
+			if err != nil {
+				if cmd.Context().Err() != nil {
+					return &exitError{code: 130, err: err}
+				}
+				return failure(err)
+			}
+			printInstallResult(options.Out, result)
+			return nil
+		},
+	}
+	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
 	return command
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/install"
 )
 
 const schemaVersion = 1
@@ -151,6 +152,35 @@ func printSelection(writer io.Writer, selection dotnet.Selection) {
 			}
 			fmt.Fprintln(writer, line)
 		}
+	}
+}
+
+func printInstallPlan(writer io.Writer, plan install.Plan) {
+	if plan.AlreadyInstalled {
+		fmt.Fprintln(writer, "Managed .NET SDK already installed")
+	} else {
+		fmt.Fprintln(writer, "Managed .NET SDK installation")
+	}
+	fmt.Fprintf(writer, "  SDK          %s\n", plan.Version)
+	fmt.Fprintf(writer, "  RID          %s\n", plan.RID)
+	fmt.Fprintf(writer, "  Destination  %s\n", plan.Root)
+	if plan.SourceURL != "" {
+		fmt.Fprintf(writer, "  Source       %s\n", plan.SourceURL)
+	}
+	if plan.SystemCopy {
+		fmt.Fprintln(writer, "  Note         this SDK version is also present in a non-managed root; Hilt will install a private copy")
+	}
+}
+
+func printInstallResult(writer io.Writer, result install.Result) {
+	if result.AlreadyInstalled {
+		fmt.Fprintf(writer, "SDK %s is already installed at %s\n", result.Version, result.Root)
+		return
+	}
+	fmt.Fprintf(writer, "Installed .NET SDK %s at %s\n", result.Version, result.Root)
+	fmt.Fprintf(writer, "  Verified with %s --list-sdks and --info\n", result.DotnetPath)
+	if result.SystemCopy {
+		fmt.Fprintln(writer, "  The system copy was left untouched.")
 	}
 }
 

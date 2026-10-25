@@ -5,21 +5,29 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 )
 
 type fakeBackend struct {
-	inventory    dotnet.Inventory
-	inventoryErr error
-	selection    dotnet.Selection
-	selectionErr error
-	report       diagnostics.Report
+	inventory     dotnet.Inventory
+	inventoryErr  error
+	selection     dotnet.Selection
+	selectionErr  error
+	plan          install.Plan
+	planErr       error
+	installResult install.Result
+	installErr    error
+	report        diagnostics.Report
 }
 
 func (f fakeBackend) Version() string       { return "test" }
@@ -34,6 +42,15 @@ func (f fakeBackend) Inventory(context.Context) (dotnet.Inventory, error) {
 }
 func (f fakeBackend) Resolve(context.Context, dotnet.Inventory) (dotnet.Selection, error) {
 	return f.selection, f.selectionErr
+}
+func (f fakeBackend) PlanSDKInstall(context.Context, string) (install.Plan, error) {
+	return f.plan, f.planErr
+}
+func (f fakeBackend) InstallSDK(_ context.Context, _ install.Plan, progress io.Writer) (install.Result, error) {
+	if progress != nil {
+		_, _ = fmt.Fprintln(progress, "Downloading test archive")
+	}
+	return f.installResult, f.installErr
 }
 func (f fakeBackend) Diagnose(context.Context) diagnostics.Report { return f.report }
 func (f fakeBackend) Tool(string) (string, bool)                  { return "", false }
@@ -232,6 +249,106 @@ func TestSDKListJSON(t *testing.T) {
 	}
 	if len(payload.Warnings) != 1 {
 		t.Errorf("warnings = %v, want 1", payload.Warnings)
+	}
+}
+
+func TestSDKInstallHuman(t *testing.T) {
+	backend := populatedBackend()
+	backend.plan = install.Plan{
+		Version:    "10.0.100",
+		RID:        "linux-x64",
+		Root:       "/home/u/.local/share/hilt/dotnet/10.0.100",
+		DotnetPath: "/home/u/.local/share/hilt/dotnet/10.0.100/dotnet",
+		SourceURL:  "https://builds.dotnet.microsoft.com/dotnet/sdk.tar.gz",
+		SystemCopy: true,
+	}
+	backend.installResult = install.Result{
+		Version:     "10.0.100",
+		RID:         "linux-x64",
+		Root:        backend.plan.Root,
+		DotnetPath:  backend.plan.DotnetPath,
+		SourceURL:   backend.plan.SourceURL,
+		InstalledAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+		SystemCopy:  true,
+	}
+	result := run(t, []string{"sdk", "install", "10.0.100"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Managed .NET SDK installation", "10.0.100", "linux-x64", "Destination", "private copy", "Installed .NET SDK"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+	if !strings.Contains(result.stderr, "Downloading test archive") {
+		t.Errorf("progress missing from stderr: %q", result.stderr)
+	}
+}
+
+func TestSDKInstallJSON(t *testing.T) {
+	backend := populatedBackend()
+	backend.plan = install.Plan{Version: "10.0.100", RID: "linux-x64", Root: "/managed/10.0.100", DotnetPath: "/managed/10.0.100/dotnet"}
+	backend.installResult = install.Result{
+		Version:     "10.0.100",
+		RID:         "linux-x64",
+		Root:        backend.plan.Root,
+		DotnetPath:  backend.plan.DotnetPath,
+		InstalledAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+	}
+	result := run(t, []string{"sdk", "install", "10.0.100", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	if result.stderr != "" {
+		t.Errorf("JSON mode wrote to stderr: %q", result.stderr)
+	}
+	var payload struct {
+		SchemaVersion int            `json:"schemaVersion"`
+		Install       install.Result `json:"install"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, result.stdout)
+	}
+	if payload.SchemaVersion != 1 || payload.Install.Version != "10.0.100" || payload.Install.Root != "/managed/10.0.100" {
+		t.Errorf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestSDKInstallAlreadyInstalled(t *testing.T) {
+	backend := populatedBackend()
+	backend.plan = install.Plan{Version: "10.0.100", RID: "linux-x64", Root: "/managed/10.0.100", DotnetPath: "/managed/10.0.100/dotnet", AlreadyInstalled: true}
+	backend.installResult = install.Result{
+		Version:          "10.0.100",
+		RID:              "linux-x64",
+		Root:             backend.plan.Root,
+		DotnetPath:       backend.plan.DotnetPath,
+		AlreadyInstalled: true,
+	}
+	result := run(t, []string{"sdk", "install", "10.0.100"}, backend, false, nil)
+	if result.code != 0 || !strings.Contains(result.stdout, "already installed") {
+		t.Errorf("result = %d %q", result.code, result.stdout)
+	}
+}
+
+func TestSDKInstallErrors(t *testing.T) {
+	invalid := run(t, []string{"sdk", "install", "latest"}, populatedBackend(), false, nil)
+	if invalid.code != 2 || !strings.Contains(invalid.stderr, "invalid SDK version") {
+		t.Errorf("invalid version = %d %q", invalid.code, invalid.stderr)
+	}
+
+	backend := populatedBackend()
+	backend.planErr = errors.New("metadata unavailable")
+	failed := run(t, []string{"sdk", "install", "10.0.100"}, backend, false, nil)
+	if failed.code != 1 || !strings.Contains(failed.stderr, "metadata unavailable") {
+		t.Errorf("plan failure = %d %q", failed.code, failed.stderr)
+	}
+
+	backend = populatedBackend()
+	backend.plan = install.Plan{Version: "10.0.100", RID: "linux-x64", Root: "/managed/10.0.100"}
+	backend.installErr = errors.New("download failed")
+	failed = run(t, []string{"sdk", "install", "10.0.100"}, backend, false, nil)
+	if failed.code != 1 || !strings.Contains(failed.stderr, "download failed") {
+		t.Errorf("install failure = %d %q", failed.code, failed.stderr)
 	}
 }
 
