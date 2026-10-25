@@ -204,6 +204,46 @@ func TestInstallerPlanInstallAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestInstallerInstallThenRemove(t *testing.T) {
+	archivePath := writeTarGz(t, []archiveEntry{
+		{name: "dotnet", body: "#!/bin/sh\n", mode: 0o755, typeflag: tar.TypeReg},
+		{name: "sdk/10.0.100/", mode: 0o755, typeflag: tar.TypeDir},
+	})
+	archive, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := newInstallServer(t, "10.0.100", "linux-x64", archive, "")
+	defer server.Close()
+	installer := testInstaller(t, server, &fakeRunner{version: "10.0.100"})
+
+	plan, err := installer.Plan(context.Background(), "10.0.100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := installer.Install(context.Background(), plan, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removal, err := installer.Remove(context.Background(), result.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removal.Stale || removal.Root != result.Root {
+		t.Errorf("removal = %+v", removal)
+	}
+	if _, err := os.Stat(result.Root); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("root still exists after removal: %v", err)
+	}
+	manifest, err := Load(installer.ManifestPath, installer.ManagedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Find(result.Version) != nil || manifest.Owns(result.Root, result.Version) {
+		t.Error("manifest still owns removed SDK")
+	}
+}
+
 func TestInstallerChecksumMismatchLeavesNoInstall(t *testing.T) {
 	archivePath := writeTarGz(t, []archiveEntry{{name: "dotnet", body: "binary", mode: 0o755, typeflag: tar.TypeReg}})
 	archive, err := os.ReadFile(archivePath)
