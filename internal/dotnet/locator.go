@@ -16,17 +16,48 @@ const (
 	SourceManaged    Source = "managed"
 )
 
+// Provenance describes where a toolchain came from and whether Hilt owns it.
+// Managed is path-based; owned additionally requires manifest ownership.
+type Provenance string
+
+const (
+	ProvenanceSystem   Provenance = "system"
+	ProvenanceExternal Provenance = "external"
+	ProvenanceManaged  Provenance = "managed"
+	ProvenanceOwned    Provenance = "owned"
+)
+
+// Ownership reports whether a managed root, or a specific version inside it, is
+// recorded in Hilt's install manifest. An empty version asks whether the root
+// contains any owned entry. Implementations must be read-only.
+type Ownership interface {
+	Owns(root, version string) bool
+}
+
+// OwnershipFunc adapts a function to Ownership.
+type OwnershipFunc func(root, version string) bool
+
+func (f OwnershipFunc) Owns(root, version string) bool { return f(root, version) }
+
 // StatFunc is the subset of os.Stat used for discovery.
 type StatFunc func(string) (os.FileInfo, error)
 
 // Installation is a discovered .NET root.
 type Installation struct {
-	Root       string `json:"root"`
-	DotnetPath string `json:"dotnetPath"`
-	Source     Source `json:"source"`
-	Managed    bool   `json:"managed"`
-	Usable     bool   `json:"usable"`
-	Reason     string `json:"reason,omitempty"`
+	Root       string     `json:"root"`
+	DotnetPath string     `json:"dotnetPath"`
+	Source     Source     `json:"source"`
+	Managed    bool       `json:"managed"`
+	Owned      bool       `json:"owned"`
+	Provenance Provenance `json:"provenance"`
+	Usable     bool       `json:"usable"`
+	Reason     string     `json:"reason,omitempty"`
+}
+
+// EffectiveProvenance returns the recorded provenance or a conservative
+// fallback derived from the path-based managed flag.
+func (i Installation) EffectiveProvenance() Provenance {
+	return effectiveProvenance(i.Provenance, i.Managed, i.Owned)
 }
 
 // Locator discovers .NET installation roots.
@@ -38,6 +69,8 @@ type Locator struct {
 	ManagedRoot  string
 	Home         string
 	KnownRoots   []string
+	SystemRoots  []string
+	Ownership    Ownership
 }
 
 // Locate returns installation candidates in priority order, deduplicated by
@@ -90,16 +123,27 @@ func (l Locator) Locate() []Installation {
 			reason = "dotnet executable not found in root"
 		}
 
+		managed := isWithin(root, l.ManagedRoot)
+		owned := managed && l.Ownership != nil && l.Ownership.Owns(root, "")
+		provenance := effectiveProvenance(Provenance(""), managed, owned)
+		if !managed && !l.isSystemRoot(root) {
+			provenance = ProvenanceExternal
+		}
+
 		installations = append(installations, Installation{
 			Root:       root,
 			DotnetPath: dotnetPath,
 			Source:     source,
-			Managed:    isWithin(root, l.ManagedRoot),
+			Managed:    managed,
+			Owned:      owned,
+			Provenance: provenance,
 			Usable:     usable,
 			Reason:     reason,
 		})
 	}
 
+	// DOTNET_ROOT is a discovery input only. Hilt never treats it as an install
+	// destination and never writes to it.
 	add(l.Getenv("DOTNET_ROOT"), SourceDotnetRoot)
 
 	if binary, err := l.LookPath("dotnet"); err == nil && binary != "" {
@@ -137,6 +181,40 @@ func (l Locator) knownRoots() []string {
 		roots = append(roots, l.ManagedRoot)
 	}
 	return roots
+}
+
+func (l Locator) isSystemRoot(root string) bool {
+	for _, systemRoot := range l.systemRoots() {
+		if isWithin(root, systemRoot) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l Locator) systemRoots() []string {
+	if l.SystemRoots != nil {
+		return l.SystemRoots
+	}
+	return []string{
+		"/usr/share/dotnet",
+		"/usr/lib/dotnet",
+		"/usr/lib64/dotnet",
+		"/opt/dotnet",
+	}
+}
+
+func effectiveProvenance(provenance Provenance, managed, owned bool) Provenance {
+	if provenance != "" {
+		return provenance
+	}
+	if managed {
+		if owned {
+			return ProvenanceOwned
+		}
+		return ProvenanceManaged
+	}
+	return ProvenanceSystem
 }
 
 func isWithin(path, root string) bool {

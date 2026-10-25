@@ -150,6 +150,68 @@ func TestDiscoverPreservesLocatorPriority(t *testing.T) {
 	}
 }
 
+func TestDiscoverOwnershipIsPerVersion(t *testing.T) {
+	managedRoot := t.TempDir()
+	root := filepath.Join(managedRoot, "toolchains")
+	createRoot(t, root, "10.0.100")
+	if err := os.MkdirAll(filepath.Join(root, "sdk", "9.0.300"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	locator := Locator{
+		LookPath:    func(string) (string, error) { return "", errors.New("not found") },
+		Stat:        os.Stat,
+		Getenv:      func(string) string { return "" },
+		ManagedRoot: managedRoot,
+		KnownRoots:  []string{root},
+		SystemRoots: []string{},
+		Ownership: OwnershipFunc(func(candidate, version string) bool {
+			return candidate == root && (version == "" || version == "10.0.100")
+		}),
+	}
+	inventory := Discover(context.Background(), locator, nil, os.Stat)
+	if len(inventory.SDKs) != 2 {
+		t.Fatalf("SDKs = %+v", inventory.SDKs)
+	}
+	provenance := map[string]Provenance{}
+	owned := map[string]bool{}
+	for _, sdk := range inventory.SDKs {
+		provenance[sdk.Version] = sdk.Provenance
+		owned[sdk.Version] = sdk.Owned
+	}
+	if provenance["10.0.100"] != ProvenanceOwned || !owned["10.0.100"] {
+		t.Errorf("owned SDK = %+v", inventory.SDKs)
+	}
+	if provenance["9.0.300"] != ProvenanceManaged || owned["9.0.300"] {
+		t.Errorf("unowned managed SDK = %+v", inventory.SDKs)
+	}
+	if inventory.Hosts[0].Provenance != ProvenanceOwned {
+		t.Errorf("host provenance = %q", inventory.Hosts[0].Provenance)
+	}
+}
+
+func TestDiscoverWithoutOwnershipStillFindsManaged(t *testing.T) {
+	managedRoot := t.TempDir()
+	root := filepath.Join(managedRoot, "toolchains")
+	createRoot(t, root, "10.0.100")
+
+	locator := Locator{
+		LookPath:    func(string) (string, error) { return "", errors.New("not found") },
+		Stat:        os.Stat,
+		Getenv:      func(string) string { return "" },
+		ManagedRoot: managedRoot,
+		KnownRoots:  []string{root},
+		SystemRoots: []string{},
+	}
+	inventory := Discover(context.Background(), locator, nil, os.Stat)
+	if len(inventory.SDKs) != 1 {
+		t.Fatalf("SDKs = %+v", inventory.SDKs)
+	}
+	if inventory.SDKs[0].Provenance != ProvenanceManaged || inventory.SDKs[0].Owned {
+		t.Errorf("SDK = %+v", inventory.SDKs[0])
+	}
+}
+
 func TestDiscoverDuplicateVersionWarning(t *testing.T) {
 	rootA := fakeRoot(t)
 	rootB := fakeRoot(t)

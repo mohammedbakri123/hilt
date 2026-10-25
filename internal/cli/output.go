@@ -103,7 +103,7 @@ func printSDKs(writer io.Writer, inventory dotnet.Inventory) {
 		if !sdk.Usable {
 			usable = "no"
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", sdk.Version, sourceLabel(sdk.Managed), usable, sdk.Path)
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", sdk.Version, sdk.EffectiveProvenance(), usable, sdk.Path)
 	}
 	_ = table.Flush()
 }
@@ -117,14 +117,7 @@ func printRuntimes(writer io.Writer, inventory dotnet.Inventory) {
 	fmt.Fprintln(table, "FRAMEWORK\tVERSION\tSOURCE\tPATH")
 	for _, runtime := range inventory.Runtimes {
 		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
-			runtime.Framework, runtime.Version, sourceLabel(runtime.Managed), runtime.Path)
+			runtime.Framework, runtime.Version, runtime.EffectiveProvenance(), runtime.Path)
 	}
 	_ = table.Flush()
-}
-
-func sourceLabel(managed bool) string {
-	if managed {
-		return "managed"
-	}
-	return "system"
 }

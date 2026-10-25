@@ -11,36 +11,63 @@ import (
 
 // SDK is a discovered .NET SDK.
 type SDK struct {
-	Version      string `json:"version"`
-	Path         string `json:"path"`
-	Root         string `json:"root"`
-	Architecture string `json:"architecture,omitempty"`
-	Managed      bool   `json:"managed"`
-	Usable       bool   `json:"usable"`
-	DetectedBy   string `json:"detectedBy"`
+	Version      string     `json:"version"`
+	Path         string     `json:"path"`
+	Root         string     `json:"root"`
+	Source       Source     `json:"source"`
+	Architecture string     `json:"architecture,omitempty"`
+	Managed      bool       `json:"managed"`
+	Owned        bool       `json:"owned"`
+	Provenance   Provenance `json:"provenance"`
+	Usable       bool       `json:"usable"`
+	DetectedBy   string     `json:"detectedBy"`
+}
+
+// EffectiveProvenance returns the recorded provenance or a conservative
+// fallback derived from the path-based managed flag.
+func (s SDK) EffectiveProvenance() Provenance {
+	return effectiveProvenance(s.Provenance, s.Managed, s.Owned)
 }
 
 // Runtime is a discovered shared runtime.
 type Runtime struct {
-	Framework  string `json:"framework"`
-	Version    string `json:"version"`
-	Path       string `json:"path"`
-	Root       string `json:"root"`
-	Managed    bool   `json:"managed"`
-	DetectedBy string `json:"detectedBy"`
+	Framework  string     `json:"framework"`
+	Version    string     `json:"version"`
+	Path       string     `json:"path"`
+	Root       string     `json:"root"`
+	Source     Source     `json:"source"`
+	Managed    bool       `json:"managed"`
+	Owned      bool       `json:"owned"`
+	Provenance Provenance `json:"provenance"`
+	DetectedBy string     `json:"detectedBy"`
+}
+
+// EffectiveProvenance returns the recorded provenance or a conservative
+// fallback derived from the path-based managed flag.
+func (r Runtime) EffectiveProvenance() Provenance {
+	return effectiveProvenance(r.Provenance, r.Managed, r.Owned)
 }
 
 // Host is one .NET root and everything found inside it.
 type Host struct {
-	Root         string    `json:"root"`
-	DotnetPath   string    `json:"dotnetPath"`
-	Source       Source    `json:"source"`
-	Managed      bool      `json:"managed"`
-	Architecture string    `json:"architecture,omitempty"`
-	RID          string    `json:"rid,omitempty"`
-	SDKs         []SDK     `json:"sdks"`
-	Runtimes     []Runtime `json:"runtimes"`
-	ProbeError   string    `json:"probeError,omitempty"`
+	Root         string     `json:"root"`
+	DotnetPath   string     `json:"dotnetPath"`
+	Source       Source     `json:"source"`
+	Managed      bool       `json:"managed"`
+	Owned        bool       `json:"owned"`
+	Provenance   Provenance `json:"provenance"`
+	Usable       bool       `json:"usable"`
+	Architecture string     `json:"architecture,omitempty"`
+	RID          string     `json:"rid,omitempty"`
+	SDKs         []SDK      `json:"sdks"`
+	Runtimes     []Runtime  `json:"runtimes"`
+	ProbeError   string     `json:"probeError,omitempty"`
+}
+
+// EffectiveProvenance returns the recorded provenance or a conservative
+// fallback derived from the path-based managed flag.
+func (h Host) EffectiveProvenance() Provenance {
+	return effectiveProvenance(h.Provenance, h.Managed, h.Owned)
 }
 
 // Inventory is the complete detected .NET state.
@@ -94,6 +121,9 @@ func Discover(ctx context.Context, locator Locator, prober Prober, stat StatFunc
 			DotnetPath: installation.DotnetPath,
 			Source:     installation.Source,
 			Managed:    installation.Managed,
+			Owned:      installation.Owned,
+			Provenance: installation.EffectiveProvenance(),
+			Usable:     installation.Usable,
 		}
 
 		if installation.Usable && prober != nil {
@@ -125,7 +155,10 @@ func Discover(ctx context.Context, locator Locator, prober Prober, stat StatFunc
 		for i := range host.SDKs {
 			sdk := &host.SDKs[i]
 			sdk.Root = installation.Root
+			sdk.Source = installation.Source
 			sdk.Managed = installation.Managed
+			sdk.Owned = ownedVersion(locator.Ownership, installation, sdk.Version)
+			sdk.Provenance = provenanceForInstallation(installation, sdk.Owned)
 			if sdk.Architecture == "" {
 				sdk.Architecture = host.Architecture
 			}
@@ -147,7 +180,10 @@ func Discover(ctx context.Context, locator Locator, prober Prober, stat StatFunc
 		for i := range host.Runtimes {
 			runtime := &host.Runtimes[i]
 			runtime.Root = installation.Root
+			runtime.Source = installation.Source
 			runtime.Managed = installation.Managed
+			runtime.Owned = ownedVersion(locator.Ownership, installation, runtime.Version)
+			runtime.Provenance = provenanceForInstallation(installation, runtime.Owned)
 			if runtime.DetectedBy == "" {
 				runtime.DetectedBy = "filesystem"
 			}
@@ -181,6 +217,23 @@ func Discover(ctx context.Context, locator Locator, prober Prober, stat StatFunc
 	sort.Strings(inventory.Warnings)
 	sortInventory(&inventory)
 	return inventory
+}
+
+func ownedVersion(ownership Ownership, installation Installation, version string) bool {
+	if !installation.Managed || ownership == nil {
+		return false
+	}
+	return ownership.Owns(installation.Root, version)
+}
+
+func provenanceForInstallation(installation Installation, owned bool) Provenance {
+	if installation.Managed {
+		if owned {
+			return ProvenanceOwned
+		}
+		return ProvenanceManaged
+	}
+	return installation.EffectiveProvenance()
 }
 
 func mergeSDKs(primary, fallback []SDK) []SDK {

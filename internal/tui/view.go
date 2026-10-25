@@ -302,11 +302,7 @@ func (m Model) sdkLines(width int) []string {
 		lines = append(lines, "  none detected")
 	}
 	for _, host := range inventory.Hosts {
-		classification := "system"
-		if host.Managed {
-			classification = "hilt-managed"
-		}
-		line := fmt.Sprintf("  %s  [%s] %s", host.Root, host.Source, classification)
+		line := fmt.Sprintf("  %s  [%s] %s", host.Root, host.Source, host.EffectiveProvenance())
 		if host.Architecture != "" {
 			line += "  arch=" + host.Architecture
 		}
@@ -321,15 +317,11 @@ func (m Model) sdkLines(width int) []string {
 		lines = append(lines, "  none detected. SDK installation is planned for Phase 2.")
 	}
 	for _, sdk := range inventory.SDKs {
-		classification := "system"
-		if sdk.Managed {
-			classification = "hilt-managed"
-		}
 		state := ""
 		if !sdk.Usable {
 			state = "  " + styleWarning.Render("unusable")
 		}
-		lines = append(lines, fmt.Sprintf("  %-12s %s  [%s]%s", sdk.Version, sdk.Path, classification, state))
+		lines = append(lines, fmt.Sprintf("  %-12s %s  [%s]%s", sdk.Version, sdk.Path, sdk.EffectiveProvenance(), state))
 	}
 
 	lines = append(lines, "", styleLabel.Render("RUNTIMES"))

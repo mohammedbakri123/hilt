@@ -61,6 +61,62 @@ func TestLocatorDotnetRootPriority(t *testing.T) {
 	}
 }
 
+func TestLocatorOwnershipSeparateFromManaged(t *testing.T) {
+	managedRoot := t.TempDir()
+	ownedRoot := filepath.Join(managedRoot, "owned")
+	unownedRoot := filepath.Join(managedRoot, "unowned")
+	for _, root := range []string{ownedRoot, unownedRoot} {
+		createRoot(t, root, "10.0.100")
+	}
+
+	locator := Locator{
+		LookPath:    func(string) (string, error) { return "", errors.New("not found") },
+		Stat:        os.Stat,
+		Getenv:      func(string) string { return "" },
+		ManagedRoot: managedRoot,
+		KnownRoots:  []string{ownedRoot, unownedRoot},
+		SystemRoots: []string{},
+		Ownership: OwnershipFunc(func(root, version string) bool {
+			return root == ownedRoot && version == ""
+		}),
+	}
+	installations := locator.Locate()
+	if len(installations) != 2 {
+		t.Fatalf("Locate() returned %d installations: %+v", len(installations), installations)
+	}
+	if installations[0].Provenance != ProvenanceOwned || !installations[0].Owned {
+		t.Errorf("owned root = %+v", installations[0])
+	}
+	if installations[1].Provenance != ProvenanceManaged || installations[1].Owned {
+		t.Errorf("unowned managed root = %+v", installations[1])
+	}
+}
+
+func TestLocatorClassifiesSystemAndExternal(t *testing.T) {
+	systemRoot := t.TempDir()
+	externalRoot := t.TempDir()
+	createRoot(t, systemRoot, "10.0.100")
+	createRoot(t, externalRoot, "9.0.300")
+
+	locator := Locator{
+		LookPath:    func(string) (string, error) { return "", errors.New("not found") },
+		Stat:        os.Stat,
+		Getenv:      func(string) string { return "" },
+		KnownRoots:  []string{systemRoot, externalRoot},
+		SystemRoots: []string{systemRoot},
+	}
+	installations := locator.Locate()
+	if len(installations) != 2 {
+		t.Fatalf("Locate() returned %d installations", len(installations))
+	}
+	if installations[0].Provenance != ProvenanceSystem {
+		t.Errorf("system root = %+v", installations[0])
+	}
+	if installations[1].Provenance != ProvenanceExternal {
+		t.Errorf("external root = %+v", installations[1])
+	}
+}
+
 func TestLocatorSkipsMissingRoots(t *testing.T) {
 	locator := Locator{
 		LookPath:   func(string) (string, error) { return "", errors.New("not found") },
@@ -94,11 +150,19 @@ func TestIsWithin(t *testing.T) {
 func fakeRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+	createRoot(t, root, "10.0.100")
+	return root
+}
+
+func createRoot(t *testing.T, root, sdkVersion string) {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "dotnet"), []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "sdk", "10.0.100"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "sdk", sdkVersion), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return root
 }
