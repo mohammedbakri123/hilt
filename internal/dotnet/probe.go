@@ -45,13 +45,7 @@ func (p CLIProber) run(ctx context.Context, installation Installation, args ...s
 	if p.Runner == nil {
 		return nil, fmt.Errorf("no process runner configured")
 	}
-	env := process.EnvWith(os.Environ(), map[string]string{
-		"DOTNET_ROOT":                       installation.Root,
-		"DOTNET_MULTILEVEL_LOOKUP":          "0",
-		"DOTNET_CLI_TELEMETRY_OPTOUT":       "1",
-		"DOTNET_NOLOGO":                     "1",
-		"DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
-	})
+	env := BuildToolchainEnvironment(os.Environ(), installation.Root)
 	result, err := p.Runner.Run(ctx, process.Spec{
 		Name: installation.DotnetPath,
 		Args: args,
