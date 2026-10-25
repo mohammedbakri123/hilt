@@ -14,6 +14,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/mohammedbakri123/hilt/internal/dotnet"
 )
 
 const (
@@ -116,29 +118,9 @@ func (c *ReleaseClient) ResolveSDK(ctx context.Context, version, rid string) (Ar
 	}
 
 	channel := Channel(parsed)
-	baseURL := strings.TrimRight(c.BaseURL, "/")
-	if baseURL == "" {
-		baseURL = defaultMetadataBaseURL
-	}
-	metadataURL := baseURL + "/" + channel + "/releases.json"
-	parsedURL, err := url.Parse(metadataURL)
-	if err != nil {
-		return Artifact{}, fmt.Errorf("parse release metadata URL: %w", err)
-	}
-	if err := c.validator()(parsedURL); err != nil {
-		return Artifact{}, err
-	}
-
-	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	data, err := c.fetch(fetchCtx, parsedURL, maxMetadataBytes)
+	metadata, err := c.channelMetadata(ctx, parsed)
 	if err != nil {
 		return Artifact{}, err
-	}
-
-	var metadata releaseMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return Artifact{}, fmt.Errorf("parse release metadata: %w", err)
 	}
 	sdk := metadata.findSDK(parsed.String())
 	if sdk == nil {
@@ -173,6 +155,76 @@ func (c *ReleaseClient) ResolveSDK(ctx context.Context, version, rid string) (Ar
 		FileName: fileName,
 		SHA512:   hash,
 	}, nil
+}
+
+// LatestSDK returns the newest stable SDK in the same release channel.
+func (c *ReleaseClient) LatestSDK(ctx context.Context, version string) (dotnet.Version, error) {
+	parsed, err := ValidateVersion(version)
+	if err != nil {
+		return dotnet.Version{}, err
+	}
+	metadata, err := c.channelMetadata(ctx, parsed)
+	if err != nil {
+		return dotnet.Version{}, err
+	}
+	latest, ok := metadata.latestSDK(parsed)
+	if !ok {
+		return dotnet.Version{}, &VersionNotFoundError{Version: parsed.String(), Channel: Channel(parsed)}
+	}
+	return latest, nil
+}
+
+func (c *ReleaseClient) channelMetadata(ctx context.Context, version dotnet.Version) (releaseMetadata, error) {
+	channel := Channel(version)
+	baseURL := strings.TrimRight(c.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = defaultMetadataBaseURL
+	}
+	metadataURL := baseURL + "/" + channel + "/releases.json"
+	parsedURL, err := url.Parse(metadataURL)
+	if err != nil {
+		return releaseMetadata{}, fmt.Errorf("parse release metadata URL: %w", err)
+	}
+	if err := c.validator()(parsedURL); err != nil {
+		return releaseMetadata{}, err
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	data, err := c.fetch(fetchCtx, parsedURL, maxMetadataBytes)
+	if err != nil {
+		return releaseMetadata{}, err
+	}
+
+	var metadata releaseMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return releaseMetadata{}, fmt.Errorf("parse release metadata: %w", err)
+	}
+	return metadata, nil
+}
+
+func (m releaseMetadata) latestSDK(reference dotnet.Version) (dotnet.Version, bool) {
+	var latest dotnet.Version
+	found := false
+	add := func(value string) {
+		candidate, err := ValidateVersion(value)
+		if err != nil || candidate.Major != reference.Major || candidate.Minor != reference.Minor {
+			return
+		}
+		if !found || candidate.Compare(latest) > 0 {
+			latest = candidate
+			found = true
+		}
+	}
+	for _, release := range m.Releases {
+		if release.SDK != nil {
+			add(release.SDK.Version)
+		}
+		for _, sdk := range release.SDKs {
+			add(sdk.Version)
+		}
+	}
+	return latest, found
 }
 
 func (m releaseMetadata) findSDK(version string) *sdkRelease {

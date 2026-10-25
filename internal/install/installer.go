@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -167,6 +168,68 @@ func (i Installer) Plan(ctx context.Context, version string) (Plan, error) {
 		SHA512:     FormatSHA512(artifact.SHA512),
 		FileName:   artifact.FileName,
 	}, nil
+}
+
+// Update reports whether a managed SDK has a newer stable version in its
+// release channel.
+type Update struct {
+	Version         string `json:"version"`
+	LatestVersion   string `json:"latestVersion"`
+	RID             string `json:"rid"`
+	Root            string `json:"root"`
+	UpdateAvailable bool   `json:"updateAvailable"`
+}
+
+// CheckUpdates checks manifest-owned SDKs for newer stable releases. It never
+// installs or modifies anything.
+func (i Installer) CheckUpdates(ctx context.Context) ([]Update, error) {
+	managedRoot, err := i.managedRoot()
+	if err != nil {
+		return nil, err
+	}
+	manifest, err := Load(i.manifestPath(managedRoot), managedRoot)
+	if err != nil {
+		return nil, err
+	}
+	client := i.metadata()
+	latestByChannel := make(map[string]dotnet.Version)
+	updates := make([]Update, 0, len(manifest.Installs))
+	for _, entry := range manifest.Installs {
+		root := manifest.RootFor(entry)
+		info, statErr := os.Stat(root)
+		if statErr != nil || !info.IsDir() || !usableRoot(root, entry.Version) {
+			continue
+		}
+		parsed, parseErr := ValidateVersion(entry.Version)
+		if parseErr != nil {
+			continue
+		}
+		channel := Channel(parsed)
+		latest, ok := latestByChannel[channel]
+		if !ok {
+			latest, err = client.LatestSDK(ctx, entry.Version)
+			if err != nil {
+				return nil, fmt.Errorf("check updates for SDK %s: %w", entry.Version, err)
+			}
+			latestByChannel[channel] = latest
+		}
+		updates = append(updates, Update{
+			Version:         entry.Version,
+			LatestVersion:   latest.String(),
+			RID:             entry.RID,
+			Root:            root,
+			UpdateAvailable: latest.Compare(parsed) > 0,
+		})
+	}
+	sort.SliceStable(updates, func(left, right int) bool {
+		leftVersion, leftErr := dotnet.ParseVersion(updates[left].Version)
+		rightVersion, rightErr := dotnet.ParseVersion(updates[right].Version)
+		if leftErr == nil && rightErr == nil {
+			return leftVersion.Compare(rightVersion) > 0
+		}
+		return updates[left].Version > updates[right].Version
+	})
+	return updates, nil
 }
 
 // Install acquires the install lock, verifies the archive, and publishes the SDK.

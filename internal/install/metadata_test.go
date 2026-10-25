@@ -162,3 +162,38 @@ func TestReleaseClientRejectsMalformedMetadata(t *testing.T) {
 }
 
 func allowTestURL(*url.URL) error { return nil }
+
+func TestLatestSDK(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/10.0/releases.json" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"releases":[
+			{"sdk":{"version":"10.0.100"}},
+			{"sdks":[{"version":"10.0.101"},{"version":"10.0.103-rc.1"}]},
+			{"sdk":{"version":"10.0.102"}},
+			{"sdk":{"version":"9.0.200"}}
+		]}`))
+	}))
+	defer server.Close()
+	client := &ReleaseClient{BaseURL: server.URL, HTTPClient: server.Client(), ValidateURL: allowTestURL}
+	latest, err := client.LatestSDK(context.Background(), "10.0.100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.String() != "10.0.102" {
+		t.Errorf("latest = %s, want 10.0.102", latest)
+	}
+}
+
+func TestLatestSDKMissingStableVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(`{"releases":[{"sdk":{"version":"10.0.103-rc.1"}}]}`))
+	}))
+	defer server.Close()
+	client := &ReleaseClient{BaseURL: server.URL, HTTPClient: server.Client(), ValidateURL: allowTestURL}
+	if _, err := client.LatestSDK(context.Background(), "10.0.100"); err == nil || !strings.Contains(err.Error(), "was not found") {
+		t.Fatalf("error = %v", err)
+	}
+}

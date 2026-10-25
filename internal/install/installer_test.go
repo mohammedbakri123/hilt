@@ -530,3 +530,56 @@ func TestInstallerRemoveFailureKeepsManifest(t *testing.T) {
 		t.Error("manifest entry removed after failed removal")
 	}
 }
+
+func TestInstallerCheckUpdates(t *testing.T) {
+	var mu sync.Mutex
+	requests := make(map[string]int)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		mu.Lock()
+		requests[request.URL.Path]++
+		mu.Unlock()
+		switch request.URL.Path {
+		case "/10.0/releases.json":
+			_, _ = writer.Write([]byte(`{"releases":[{"sdk":{"version":"10.0.100"}},{"sdk":{"version":"10.0.102"}}]}`))
+		case "/9.0/releases.json":
+			_, _ = writer.Write([]byte(`{"releases":[{"sdk":{"version":"9.0.100"}}]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	installer := testRemovalInstaller(t)
+	installer.Metadata = &ReleaseClient{BaseURL: server.URL, HTTPClient: server.Client(), ValidateURL: allowTestURL}
+	for _, version := range []string{"10.0.100", "9.0.100"} {
+		createInstalledRoot(t, installer, version)
+		addManifestEntry(t, installer, version)
+	}
+	addManifestEntry(t, installer, "8.0.100")
+
+	updates, err := installer.CheckUpdates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 2 {
+		t.Fatalf("updates = %+v, want 2 usable entries", updates)
+	}
+	byVersion := make(map[string]Update)
+	for _, update := range updates {
+		byVersion[update.Version] = update
+	}
+	if update := byVersion["10.0.100"]; update.LatestVersion != "10.0.102" || !update.UpdateAvailable {
+		t.Errorf("10.0.100 update = %+v", update)
+	}
+	if update := byVersion["9.0.100"]; update.LatestVersion != "9.0.100" || update.UpdateAvailable {
+		t.Errorf("9.0.100 update = %+v", update)
+	}
+	if _, ok := byVersion["8.0.100"]; ok {
+		t.Error("stale entry was included in update check")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if requests["/10.0/releases.json"] != 1 || requests["/9.0/releases.json"] != 1 {
+		t.Errorf("metadata requests = %v, want one per channel", requests)
+	}
+}
