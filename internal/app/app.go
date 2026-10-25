@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -152,6 +154,52 @@ func (a *App) InstallSDK(ctx context.Context, plan install.Plan, progress io.Wri
 		a.locator.Ownership = manifest
 	}
 	return result, nil
+}
+
+// RemoveSDK removes a manifest-owned managed SDK.
+func (a *App) RemoveSDK(ctx context.Context, version string) (install.Removal, error) {
+	removal, err := a.installer().Remove(ctx, version)
+	if err != nil {
+		return install.Removal{}, a.removalError(ctx, version, err)
+	}
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+		a.locator.Ownership = manifest
+	}
+	return removal, nil
+}
+
+func (a *App) removalError(ctx context.Context, version string, cause error) error {
+	var notInstalled *install.NotInstalledError
+	var notOwned *install.NotOwnedError
+	if !errors.As(cause, &notInstalled) && !errors.As(cause, &notOwned) {
+		return cause
+	}
+	parsed, err := install.ValidateVersion(version)
+	if err != nil {
+		return cause
+	}
+	canonical := parsed.String()
+	inventory, inventoryErr := a.Inventory(ctx)
+	if inventoryErr != nil {
+		return cause
+	}
+	for _, sdk := range inventory.SDKs {
+		if sdk.Version == canonical && sdk.EffectiveProvenance() == dotnet.ProvenanceManaged {
+			return fmt.Errorf("SDK %s at %s is under the managed root but is not recorded in Hilt's install manifest; refusing to remove it", canonical, sdk.Root)
+		}
+	}
+	for _, sdk := range inventory.SDKs {
+		if sdk.Version != canonical {
+			continue
+		}
+		switch sdk.EffectiveProvenance() {
+		case dotnet.ProvenanceSystem:
+			return fmt.Errorf("SDK %s is provided by the system at %s; Hilt only removes managed SDKs", canonical, sdk.Root)
+		case dotnet.ProvenanceExternal:
+			return fmt.Errorf("SDK %s is provided by an external installation at %s; Hilt only removes managed SDKs", canonical, sdk.Root)
+		}
+	}
+	return cause
 }
 
 func (a *App) installer() install.Installer {

@@ -184,6 +184,14 @@ func printInstallResult(writer io.Writer, result install.Result) {
 	}
 }
 
+func printRemoval(writer io.Writer, removal install.Removal) {
+	if removal.Stale {
+		fmt.Fprintf(writer, "SDK %s was already missing; removed stale manifest entry for %s\n", removal.Version, removal.Root)
+		return
+	}
+	fmt.Fprintf(writer, "Removed .NET SDK %s from %s\n", removal.Version, removal.Root)
+}
+
 func sourceName(inventory dotnet.Inventory, root string, source dotnet.Source) string {
 	if source != "" {
 		return string(source)

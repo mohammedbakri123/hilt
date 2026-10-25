@@ -28,6 +28,7 @@ type Backend interface {
 	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
 	PlanSDKInstall(ctx context.Context, version string) (install.Plan, error)
 	InstallSDK(ctx context.Context, plan install.Plan, progress io.Writer) (install.Result, error)
+	RemoveSDK(ctx context.Context, version string) (install.Removal, error)
 	Diagnose(ctx context.Context) diagnostics.Report
 	Tool(name string) (string, bool)
 }
@@ -261,6 +262,7 @@ func newSDKCommand(options Options) *cobra.Command {
 	command.AddCommand(newInventoryListCommand(options, inventorySDKs, "list", "List installed .NET SDKs"))
 	command.AddCommand(newSDKWhichCommand(options))
 	command.AddCommand(newSDKInstallCommand(options))
+	command.AddCommand(newSDKRemoveCommand(options))
 	return command
 }
 
@@ -308,6 +310,40 @@ func newSDKInstallCommand(options Options) *cobra.Command {
 				return failure(err)
 			}
 			printInstallResult(options.Out, result)
+			return nil
+		},
+	}
+	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
+	return command
+}
+
+func newSDKRemoveCommand(options Options) *cobra.Command {
+	var asJSON bool
+	command := &cobra.Command{
+		Use:   "remove <version>",
+		Short: "Remove a managed .NET SDK",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.Context().Err(); err != nil {
+				return &exitError{code: 130, err: err}
+			}
+			if _, err := install.ValidateVersion(args[0]); err != nil {
+				return usageError(err.Error())
+			}
+			removal, err := options.Backend.RemoveSDK(cmd.Context(), args[0])
+			if err != nil {
+				if cmd.Context().Err() != nil {
+					return &exitError{code: 130, err: err}
+				}
+				return failure(err)
+			}
+			if asJSON {
+				return writeJSON(options.Out, struct {
+					SchemaVersion int             `json:"schemaVersion"`
+					Removal       install.Removal `json:"removal"`
+				}{SchemaVersion: schemaVersion, Removal: removal})
+			}
+			printRemoval(options.Out, removal)
 			return nil
 		},
 	}

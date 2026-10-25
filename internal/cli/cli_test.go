@@ -27,6 +27,8 @@ type fakeBackend struct {
 	planErr       error
 	installResult install.Result
 	installErr    error
+	removal       install.Removal
+	removeErr     error
 	report        diagnostics.Report
 }
 
@@ -51,6 +53,9 @@ func (f fakeBackend) InstallSDK(_ context.Context, _ install.Plan, progress io.W
 		_, _ = fmt.Fprintln(progress, "Downloading test archive")
 	}
 	return f.installResult, f.installErr
+}
+func (f fakeBackend) RemoveSDK(context.Context, string) (install.Removal, error) {
+	return f.removal, f.removeErr
 }
 func (f fakeBackend) Diagnose(context.Context) diagnostics.Report { return f.report }
 func (f fakeBackend) Tool(string) (string, bool)                  { return "", false }
@@ -576,5 +581,79 @@ func TestSDKWhichSelectionFailureExitsOne(t *testing.T) {
 	}
 	if !strings.Contains(result.stderr, "8.0.100") {
 		t.Errorf("missing failure: %q", result.stderr)
+	}
+}
+
+func TestSDKRemoveHuman(t *testing.T) {
+	backend := populatedBackend()
+	backend.removal = install.Removal{
+		Version:   "10.0.100",
+		RID:       "linux-x64",
+		Root:      "/home/u/.local/share/hilt/dotnet/10.0.100",
+		RemovedAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+	}
+	result := run(t, []string{"sdk", "remove", "10.0.100"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Removed .NET SDK", "10.0.100", backend.removal.Root} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestSDKRemoveStale(t *testing.T) {
+	backend := populatedBackend()
+	backend.removal = install.Removal{
+		Version:   "10.0.100",
+		Root:      "/home/u/.local/share/hilt/dotnet/10.0.100",
+		Stale:     true,
+		RemovedAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+	}
+	result := run(t, []string{"sdk", "remove", "10.0.100"}, backend, false, nil)
+	if result.code != 0 || !strings.Contains(result.stdout, "stale manifest entry") {
+		t.Errorf("result = %d %q", result.code, result.stdout)
+	}
+}
+
+func TestSDKRemoveJSON(t *testing.T) {
+	backend := populatedBackend()
+	backend.removal = install.Removal{
+		Version:   "10.0.100",
+		RID:       "linux-x64",
+		Root:      "/managed/10.0.100",
+		RemovedAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+	}
+	result := run(t, []string{"sdk", "remove", "10.0.100", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	if result.stderr != "" {
+		t.Errorf("JSON mode wrote to stderr: %q", result.stderr)
+	}
+	var payload struct {
+		SchemaVersion int             `json:"schemaVersion"`
+		Removal       install.Removal `json:"removal"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, result.stdout)
+	}
+	if payload.SchemaVersion != 1 || payload.Removal.Version != "10.0.100" || payload.Removal.Root != "/managed/10.0.100" {
+		t.Errorf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestSDKRemoveErrors(t *testing.T) {
+	invalid := run(t, []string{"sdk", "remove", "latest"}, populatedBackend(), false, nil)
+	if invalid.code != 2 || !strings.Contains(invalid.stderr, "invalid SDK version") {
+		t.Errorf("invalid version = %d %q", invalid.code, invalid.stderr)
+	}
+
+	backend := populatedBackend()
+	backend.removeErr = errors.New("refusing to remove system SDK")
+	failed := run(t, []string{"sdk", "remove", "10.0.112"}, backend, false, nil)
+	if failed.code != 1 || !strings.Contains(failed.stderr, "refusing to remove system SDK") {
+		t.Errorf("remove failure = %d %q", failed.code, failed.stderr)
 	}
 }
