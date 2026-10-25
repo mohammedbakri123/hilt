@@ -166,7 +166,7 @@ func newRoot(options Options) *cobra.Command {
 
 func versionLabel(options Options) string {
 	version := options.Backend.Version()
-	if options.Commit != "" && options.Commit != "unknown" {
+	if options.Commit != "" && options.Commit != "unknown" && options.Commit != version {
 		return version + " (" + options.Commit + ")"
 	}
 	return version
