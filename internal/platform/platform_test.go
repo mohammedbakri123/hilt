@@ -14,6 +14,8 @@ PRETTY_NAME="CachyOS"
 # comment
 QUOTED='single'
 EMPTY=
+ESCAPED="a \"quoted\" \\ \$HOME"
+EMPTY_QUOTED=""
 `)
 	values, err := ParseOSRelease(data)
 	if err != nil {
@@ -33,6 +35,12 @@ EMPTY=
 	}
 	if got, ok := values["EMPTY"]; !ok || got != "" {
 		t.Errorf("EMPTY = %q, ok=%v", got, ok)
+	}
+	if got := values["ESCAPED"]; got != `a "quoted" \ $HOME` {
+		t.Errorf("ESCAPED = %q", got)
+	}
+	if got, ok := values["EMPTY_QUOTED"]; !ok || got != "" {
+		t.Errorf("EMPTY_QUOTED = %q, ok=%v", got, ok)
 	}
 }
 

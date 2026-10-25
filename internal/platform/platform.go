@@ -62,11 +62,34 @@ func ParseOSRelease(data []byte) (map[string]string, error) {
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
 		if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
+			quote := value[0]
 			value = value[1 : len(value)-1]
+			if quote == '"' && value != "" {
+				value = unescape(value)
+			}
 		}
 		values[key] = value
 	}
 	return values, nil
+}
+
+// unescape resolves the escapes permitted inside double-quoted os-release
+// values. Single-quoted values are literal.
+func unescape(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for index := 0; index < len(value); index++ {
+		if value[index] == '\\' && index+1 < len(value) {
+			switch value[index+1] {
+			case '"', '\\', '$', '`':
+				builder.WriteByte(value[index+1])
+				index++
+				continue
+			}
+		}
+		builder.WriteByte(value[index])
+	}
+	return builder.String()
 }
 
 // DisplayName returns the most useful distribution label available.
