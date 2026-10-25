@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,15 @@ type Result struct {
 	SystemCopy       bool      `json:"systemCopy,omitempty"`
 }
 
+// Removal describes a completed managed SDK removal.
+type Removal struct {
+	Version   string    `json:"version"`
+	RID       string    `json:"rid,omitempty"`
+	Root      string    `json:"root"`
+	Stale     bool      `json:"stale"`
+	RemovedAt time.Time `json:"removedAt"`
+}
+
 // UnownedRootError reports a destination that exists without a manifest entry.
 type UnownedRootError struct {
 	Root string
@@ -57,6 +67,25 @@ type UnownedRootError struct {
 
 func (e *UnownedRootError) Error() string {
 	return fmt.Sprintf("destination %s already exists but is not recorded in Hilt's install manifest; refusing to overwrite it", e.Root)
+}
+
+// NotOwnedError reports a managed root that is not recorded in the manifest.
+type NotOwnedError struct {
+	Version string
+	Root    string
+}
+
+func (e *NotOwnedError) Error() string {
+	return fmt.Sprintf("SDK %s at %s is not recorded in Hilt's install manifest; refusing to remove it", e.Version, e.Root)
+}
+
+// NotInstalledError reports an SDK with no manifest entry and no managed root.
+type NotInstalledError struct {
+	Version string
+}
+
+func (e *NotInstalledError) Error() string {
+	return fmt.Sprintf("SDK %s is not installed in Hilt's managed root", e.Version)
 }
 
 // StaleInstallError reports a manifest entry whose root is missing.
@@ -82,6 +111,7 @@ type Installer struct {
 	MaxDownloadBytes  int64
 	MaxExtractBytes   int64
 	MaxArchiveEntries int
+	RemoveAll         func(string) error
 	Now               func() time.Time
 }
 
@@ -281,6 +311,91 @@ func (i Installer) Install(ctx context.Context, plan Plan, progress io.Writer) (
 		SHA512:      FormatSHA512(expected),
 		InstalledAt: installedAt,
 		SystemCopy:  plan.SystemCopy,
+	}, nil
+}
+
+// Remove deletes a manifest-owned SDK and then its manifest entry. Stale
+// entries are reconciled without deleting anything else.
+func (i Installer) Remove(ctx context.Context, version string) (Removal, error) {
+	parsed, err := ValidateVersion(version)
+	if err != nil {
+		return Removal{}, err
+	}
+	managedRoot, err := i.managedRoot()
+	if err != nil {
+		return Removal{}, err
+	}
+	release, err := acquireLock(ctx, i.lockPath(managedRoot))
+	if err != nil {
+		return Removal{}, err
+	}
+	defer release()
+
+	manifest, err := Load(i.manifestPath(managedRoot), managedRoot)
+	if err != nil {
+		return Removal{}, err
+	}
+	canonical := parsed.String()
+	entry := manifest.Find(canonical)
+	if entry == nil {
+		root := filepath.Join(managedRoot, canonical)
+		if _, statErr := os.Lstat(root); statErr == nil {
+			return Removal{}, &NotOwnedError{Version: canonical, Root: root}
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return Removal{}, fmt.Errorf("inspect managed SDK root %s: %w", root, statErr)
+		}
+		return Removal{}, &NotInstalledError{Version: canonical}
+	}
+
+	root := manifest.RootFor(*entry)
+	if !withinRoot(managedRoot, root) {
+		return Removal{}, fmt.Errorf("manifest root %s escapes the managed root", root)
+	}
+	info, err := os.Lstat(root)
+	if errors.Is(err, os.ErrNotExist) {
+		if _, removed := manifest.Remove(canonical); !removed {
+			return Removal{}, fmt.Errorf("SDK %s disappeared from the install manifest during removal", canonical)
+		}
+		if err := manifest.Save(); err != nil {
+			return Removal{}, fmt.Errorf("remove stale SDK manifest entry: %w", err)
+		}
+		return Removal{
+			Version:   canonical,
+			RID:       entry.RID,
+			Root:      root,
+			Stale:     true,
+			RemovedAt: i.now().UTC(),
+		}, nil
+	}
+	if err != nil {
+		return Removal{}, fmt.Errorf("inspect managed SDK root %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return Removal{}, fmt.Errorf("recorded SDK root %s is not a directory; refusing to remove it", root)
+	}
+
+	trash := filepath.Join(managedRoot, ".removing-"+canonical+"-"+strconv.FormatInt(time.Now().UnixNano(), 36))
+	if err := os.Rename(root, trash); err != nil {
+		return Removal{}, fmt.Errorf("stage SDK removal: %w", err)
+	}
+	if err := i.removeAll()(trash); err != nil {
+		if rollbackErr := os.Rename(trash, root); rollbackErr != nil {
+			return Removal{}, fmt.Errorf("remove SDK directory: %w (also failed to restore %s: %v)", err, root, rollbackErr)
+		}
+		return Removal{}, fmt.Errorf("remove SDK directory: %w", err)
+	}
+
+	if _, removed := manifest.Remove(canonical); !removed {
+		return Removal{}, fmt.Errorf("SDK %s disappeared from the install manifest during removal", canonical)
+	}
+	if err := manifest.Save(); err != nil {
+		return Removal{}, fmt.Errorf("remove SDK from install manifest: %w", err)
+	}
+	return Removal{
+		Version:   canonical,
+		RID:       entry.RID,
+		Root:      root,
+		RemovedAt: i.now().UTC(),
 	}, nil
 }
 
@@ -488,6 +603,13 @@ func (i Installer) now() time.Time {
 		return i.Now()
 	}
 	return time.Now()
+}
+
+func (i Installer) removeAll() func(string) error {
+	if i.RemoveAll != nil {
+		return i.RemoveAll
+	}
+	return os.RemoveAll
 }
 
 func usableRoot(root, version string) bool {

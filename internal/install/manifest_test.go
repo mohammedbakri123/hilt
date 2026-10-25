@@ -68,6 +68,26 @@ func TestManifestRoundTripOwnershipAndPermissions(t *testing.T) {
 	}
 }
 
+func TestManifestRemove(t *testing.T) {
+	base := t.TempDir()
+	managedRoot := filepath.Join(base, "dotnet")
+	manifest := NewManifest(managedRoot)
+	hash := sha512.Sum512([]byte("archive"))
+	if err := manifest.Add(testEntry("10.0.100", hash[:])); err != nil {
+		t.Fatal(err)
+	}
+	removed, ok := manifest.Remove("10.0.100")
+	if !ok || removed.Version != "10.0.100" {
+		t.Errorf("Remove() = %+v, %v", removed, ok)
+	}
+	if manifest.Find("10.0.100") != nil {
+		t.Error("entry still present after Remove")
+	}
+	if _, ok := manifest.Remove("10.0.100"); ok {
+		t.Error("Remove succeeded for a missing entry")
+	}
+}
+
 func TestManifestRejectsUnsafeOrInvalidEntries(t *testing.T) {
 	base := t.TempDir()
 	managedRoot := filepath.Join(base, "dotnet")

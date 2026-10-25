@@ -389,3 +389,144 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+func testRemovalInstaller(t *testing.T) Installer {
+	t.Helper()
+	base := t.TempDir()
+	managedRoot := filepath.Join(base, "dotnet")
+	return Installer{
+		ManagedRoot:  managedRoot,
+		ManifestPath: filepath.Join(base, "installs.json"),
+		LockPath:     filepath.Join(base, "installs.lock"),
+		Now: func() time.Time {
+			return time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+		},
+	}
+}
+
+func createInstalledRoot(t *testing.T, installer Installer, version string) string {
+	t.Helper()
+	root := filepath.Join(installer.ManagedRoot, version)
+	if err := os.MkdirAll(filepath.Join(root, "sdk", version), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dotnet"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func addManifestEntry(t *testing.T, installer Installer, version string) {
+	t.Helper()
+	manifest, err := Load(installer.ManifestPath, installer.ManagedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha512.Sum512([]byte("archive"))
+	if err := manifest.Add(testEntry(version, hash[:])); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Save(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallerRemoveOwned(t *testing.T) {
+	installer := testRemovalInstaller(t)
+	version := "10.0.100"
+	root := createInstalledRoot(t, installer, version)
+	addManifestEntry(t, installer, version)
+
+	removal, err := installer.Remove(context.Background(), version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removal.Stale || removal.Version != version || removal.Root != root || removal.RemovedAt.IsZero() {
+		t.Errorf("removal = %+v", removal)
+	}
+	if _, statErr := os.Stat(root); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("root still exists after removal: %v", statErr)
+	}
+	manifest, err := Load(installer.ManifestPath, installer.ManagedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Find(version) != nil {
+		t.Error("manifest entry still present")
+	}
+}
+
+func TestInstallerRemoveStaleEntryKeepsUnrelatedDirectories(t *testing.T) {
+	installer := testRemovalInstaller(t)
+	version := "10.0.100"
+	addManifestEntry(t, installer, version)
+	unrelated := filepath.Join(installer.ManagedRoot, "unrelated")
+	if err := os.MkdirAll(unrelated, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	removal, err := installer.Remove(context.Background(), version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removal.Stale || removal.Version != version {
+		t.Errorf("removal = %+v", removal)
+	}
+	if _, statErr := os.Stat(unrelated); statErr != nil {
+		t.Errorf("unrelated directory removed: %v", statErr)
+	}
+	manifest, err := Load(installer.ManifestPath, installer.ManagedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Find(version) != nil {
+		t.Error("stale manifest entry still present")
+	}
+}
+
+func TestInstallerRemoveRefusesUnownedRoot(t *testing.T) {
+	installer := testRemovalInstaller(t)
+	version := "10.0.100"
+	root := createInstalledRoot(t, installer, version)
+
+	_, err := installer.Remove(context.Background(), version)
+	var notOwned *NotOwnedError
+	if !errors.As(err, &notOwned) {
+		t.Fatalf("error = %v, want not owned", err)
+	}
+	if _, statErr := os.Stat(root); statErr != nil {
+		t.Errorf("unowned root removed: %v", statErr)
+	}
+}
+
+func TestInstallerRemoveNotInstalled(t *testing.T) {
+	installer := testRemovalInstaller(t)
+	_, err := installer.Remove(context.Background(), "10.0.100")
+	var notInstalled *NotInstalledError
+	if !errors.As(err, &notInstalled) {
+		t.Fatalf("error = %v, want not installed", err)
+	}
+}
+
+func TestInstallerRemoveFailureKeepsManifest(t *testing.T) {
+	installer := testRemovalInstaller(t)
+	version := "10.0.100"
+	root := createInstalledRoot(t, installer, version)
+	addManifestEntry(t, installer, version)
+	installer.RemoveAll = func(string) error { return errors.New("busy") }
+
+	_, err := installer.Remove(context.Background(), version)
+	if err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("error = %v, want busy", err)
+	}
+	if _, statErr := os.Stat(root); statErr != nil {
+		t.Errorf("root was not restored after failed removal: %v", statErr)
+	}
+	manifest, err := Load(installer.ManifestPath, installer.ManagedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Find(version) == nil {
+		t.Error("manifest entry removed after failed removal")
+	}
+}

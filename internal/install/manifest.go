@@ -120,6 +120,21 @@ func (m *Manifest) rootFor(entry Entry) string {
 	return filepath.Join(m.managedRoot, filepath.FromSlash(entry.Root))
 }
 
+// Remove deletes the entry for an exact version.
+func (m *Manifest) Remove(version string) (Entry, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index := range m.Installs {
+		if m.Installs[index].Version != version {
+			continue
+		}
+		removed := m.Installs[index]
+		m.Installs = append(m.Installs[:index], m.Installs[index+1:]...)
+		return removed, true
+	}
+	return Entry{}, false
+}
+
 // Add appends a validated entry.
 func (m *Manifest) Add(entry Entry) error {
 	normalized, err := normalizeEntry(entry, m.managedRoot)
