@@ -122,6 +122,34 @@ func TestDiscoverNoInstallations(t *testing.T) {
 	}
 }
 
+func TestDiscoverPreservesLocatorPriority(t *testing.T) {
+	dotnetRoot := fakeRoot(t)
+	pathRoot := fakeRoot(t)
+	locator := Locator{
+		LookPath: func(string) (string, error) {
+			return filepath.Join(pathRoot, "dotnet"), nil
+		},
+		Stat: os.Stat,
+		Getenv: func(key string) string {
+			if key == "DOTNET_ROOT" {
+				return dotnetRoot
+			}
+			return ""
+		},
+		KnownRoots: []string{},
+	}
+	inventory := Discover(context.Background(), locator, nil, os.Stat)
+	if len(inventory.Hosts) != 2 {
+		t.Fatalf("hosts = %+v", inventory.Hosts)
+	}
+	if inventory.Hosts[0].Root != dotnetRoot || inventory.Hosts[1].Root != pathRoot {
+		t.Errorf("hosts lost discovery priority: %+v", inventory.Hosts)
+	}
+	if got := inventory.ResolvedDotnet(); got != filepath.Join(dotnetRoot, "dotnet") {
+		t.Errorf("ResolvedDotnet = %q, want DOTNET_ROOT host", got)
+	}
+}
+
 func TestDiscoverDuplicateVersionWarning(t *testing.T) {
 	rootA := fakeRoot(t)
 	rootB := fakeRoot(t)

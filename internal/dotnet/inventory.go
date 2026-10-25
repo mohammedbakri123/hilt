@@ -220,9 +220,6 @@ func pathIsDir(path string, stat StatFunc) bool {
 }
 
 func sortInventory(inventory *Inventory) {
-	sort.SliceStable(inventory.Hosts, func(i, j int) bool {
-		return inventory.Hosts[i].Root < inventory.Hosts[j].Root
-	})
 	sort.SliceStable(inventory.SDKs, func(i, j int) bool {
 		left, leftErr := ParseVersion(inventory.SDKs[i].Version)
 		right, rightErr := ParseVersion(inventory.SDKs[j].Version)
