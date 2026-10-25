@@ -4,6 +4,9 @@ This directory is the detailed, step-by-step implementation plan for Hilt.
 `../plan.md` remains the product specification. This directory describes how
 Phase 1 is built, tested, and verified.
 
+Phase 1 is complete. The approved Phase 2 design and next-session handoff are in
+[11-phase-2-handoff.md](11-phase-2-handoff.md).
+
 ## Phase 1 goal
 
 Ship a standalone Go executable that:
