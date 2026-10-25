@@ -19,19 +19,27 @@ import (
 )
 
 type fakeBackend struct {
-	inventory     dotnet.Inventory
-	inventoryErr  error
-	selection     dotnet.Selection
-	selectionErr  error
-	plan          install.Plan
-	planErr       error
-	installResult install.Result
-	installErr    error
-	removal       install.Removal
-	removeErr     error
-	updates       []install.Update
-	updatesErr    error
-	report        diagnostics.Report
+	inventory         dotnet.Inventory
+	inventoryErr      error
+	selection         dotnet.Selection
+	selectionErr      error
+	plan              install.Plan
+	planErr           error
+	installResult     install.Result
+	installErr        error
+	removal           install.Removal
+	removeErr         error
+	updates           []install.Update
+	updatesErr        error
+	runtimePlan       install.RuntimePlan
+	runtimePlanErr    error
+	runtimeResult     install.RuntimeResult
+	runtimeInstallErr error
+	runtimeRemoval    install.Removal
+	runtimeRemoveErr  error
+	runtimeUpdates    []install.Update
+	runtimeUpdatesErr error
+	report            diagnostics.Report
 }
 
 func (f fakeBackend) Version() string       { return "test" }
@@ -61,6 +69,24 @@ func (f fakeBackend) RemoveSDK(context.Context, string) (install.Removal, error)
 }
 func (f fakeBackend) CheckSDKUpdates(context.Context) ([]install.Update, error) {
 	return f.updates, f.updatesErr
+}
+func (f fakeBackend) PlanRuntimeInstall(_ context.Context, _ string, framework install.FrameworkFlavor) (install.RuntimePlan, error) {
+	if f.runtimePlan.Framework == "" {
+		f.runtimePlan.Framework = string(framework)
+	}
+	return f.runtimePlan, f.runtimePlanErr
+}
+func (f fakeBackend) InstallRuntime(_ context.Context, _ install.RuntimePlan, progress io.Writer) (install.RuntimeResult, error) {
+	if progress != nil {
+		_, _ = fmt.Fprintln(progress, "Downloading runtime test archive")
+	}
+	return f.runtimeResult, f.runtimeInstallErr
+}
+func (f fakeBackend) RemoveRuntime(context.Context, string) (install.Removal, error) {
+	return f.runtimeRemoval, f.runtimeRemoveErr
+}
+func (f fakeBackend) CheckRuntimeUpdates(context.Context) ([]install.Update, error) {
+	return f.runtimeUpdates, f.runtimeUpdatesErr
 }
 func (f fakeBackend) Diagnose(context.Context) diagnostics.Report { return f.report }
 func (f fakeBackend) Tool(string) (string, bool)                  { return "", false }
@@ -725,6 +751,260 @@ func TestSDKOutdatedErrors(t *testing.T) {
 	backend.updatesErr = errors.New("metadata unavailable")
 	result := run(t, []string{"sdk", "outdated"}, backend, false, nil)
 	if result.code != 1 || !strings.Contains(result.stderr, "metadata unavailable") {
+		t.Errorf("result = %d %q", result.code, result.stderr)
+	}
+}
+
+func TestRuntimeInstallHuman(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimePlan = install.RuntimePlan{
+		Version:    "10.0.12",
+		RID:        "linux-x64",
+		Framework:  "aspnetcore",
+		Frameworks: []string{"Microsoft.AspNetCore.App", "Microsoft.NETCore.App"},
+		Root:       "/home/u/.local/share/hilt/dotnet/runtimes/10.0.12",
+		Artifacts: []install.RuntimeArtifact{{
+			Product:  "aspnetcore-runtime",
+			URL:      "https://builds.dotnet.microsoft.com/dotnet/aspnetcore.tar.gz",
+			FileName: "dotnet-aspnetcore-runtime-10.0.12-linux-x64.tar.gz",
+		}},
+		SystemCopy: true,
+	}
+	backend.runtimeResult = install.RuntimeResult{
+		Version:      "10.0.12",
+		RID:          "linux-x64",
+		Framework:    "aspnetcore",
+		Frameworks:   backend.runtimePlan.Frameworks,
+		Root:         backend.runtimePlan.Root,
+		InstalledAt:  time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+		VerifiedWith: backend.runtimePlan.Root + "/dotnet",
+	}
+	result := run(t, []string{"runtime", "install", "10.0.12", "--framework", "aspnetcore"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{
+		"Managed .NET runtime installation",
+		"10.0.12",
+		"linux-x64",
+		"aspnetcore (Microsoft.AspNetCore.App, Microsoft.NETCore.App)",
+		"aspnetcore.tar.gz",
+		"runtimes/10.0.12",
+		"private copy",
+		"Installed .NET runtime",
+		"Verified with",
+		"--list-runtimes",
+	} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+	if !strings.Contains(result.stderr, "Downloading runtime test archive") {
+		t.Errorf("progress missing from stderr: %q", result.stderr)
+	}
+}
+
+func TestRuntimeInstallDefaultsToAllFramework(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimePlan = install.RuntimePlan{Version: "10.0.12", RID: "linux-x64", Framework: "all", Root: "/managed/runtimes/10.0.12"}
+	backend.runtimeResult = install.RuntimeResult{Version: "10.0.12", RID: "linux-x64", Framework: "all", Root: backend.runtimePlan.Root, InstalledAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC), VerifiedWith: "/managed/dotnet"}
+	result := run(t, []string{"runtime", "install", "10.0.12"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	if !strings.Contains(result.stdout, "Framework    all") {
+		t.Errorf("unexpected output: %q", result.stdout)
+	}
+}
+
+func TestRuntimeInstallJSON(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimePlan = install.RuntimePlan{Version: "10.0.12", RID: "linux-x64", Framework: "netcore", Frameworks: []string{"Microsoft.NETCore.App"}, Root: "/managed/runtimes/10.0.12"}
+	backend.runtimeResult = install.RuntimeResult{
+		Version:      "10.0.12",
+		RID:          "linux-x64",
+		Framework:    "netcore",
+		Frameworks:   []string{"Microsoft.NETCore.App"},
+		Root:         backend.runtimePlan.Root,
+		InstalledAt:  time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+		VerifiedWith: backend.runtimePlan.Root + "/dotnet",
+	}
+	result := run(t, []string{"runtime", "install", "10.0.12", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	if result.stderr != "" {
+		t.Errorf("JSON mode wrote to stderr: %q", result.stderr)
+	}
+	var payload struct {
+		SchemaVersion int                   `json:"schemaVersion"`
+		Install       install.RuntimeResult `json:"install"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, result.stdout)
+	}
+	if payload.SchemaVersion != 1 || payload.Install.Version != "10.0.12" || payload.Install.Root != "/managed/runtimes/10.0.12" {
+		t.Errorf("unexpected payload: %+v", payload)
+	}
+	if payload.Install.VerifiedWith == "" {
+		t.Error("JSON payload missing verifiedWith")
+	}
+}
+
+func TestRuntimeInstallAlreadyInstalled(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimePlan = install.RuntimePlan{Version: "10.0.12", RID: "linux-x64", Framework: "netcore", Root: "/managed/runtimes/10.0.12", AlreadyInstalled: true}
+	backend.runtimeResult = install.RuntimeResult{Version: "10.0.12", RID: "linux-x64", Root: backend.runtimePlan.Root, AlreadyInstalled: true}
+	result := run(t, []string{"runtime", "install", "10.0.12"}, backend, false, nil)
+	if result.code != 0 || !strings.Contains(result.stdout, "already installed at") {
+		t.Errorf("result = %d %q", result.code, result.stdout)
+	}
+}
+
+func TestRuntimeInstallErrors(t *testing.T) {
+	invalidVersion := run(t, []string{"runtime", "install", "latest"}, populatedBackend(), false, nil)
+	if invalidVersion.code != 2 || !strings.Contains(invalidVersion.stderr, "invalid SDK version") {
+		t.Errorf("invalid version = %d %q", invalidVersion.code, invalidVersion.stderr)
+	}
+
+	invalidFramework := run(t, []string{"runtime", "install", "10.0.12", "--framework", "mono"}, populatedBackend(), false, nil)
+	if invalidFramework.code != 2 || !strings.Contains(invalidFramework.stderr, "invalid framework") {
+		t.Errorf("invalid framework = %d %q", invalidFramework.code, invalidFramework.stderr)
+	}
+
+	backend := populatedBackend()
+	backend.runtimePlanErr = errors.New("metadata unavailable")
+	planFailed := run(t, []string{"runtime", "install", "10.0.12"}, backend, false, nil)
+	if planFailed.code != 1 || !strings.Contains(planFailed.stderr, "metadata unavailable") {
+		t.Errorf("plan failure = %d %q", planFailed.code, planFailed.stderr)
+	}
+
+	backend.runtimePlanErr = nil
+	backend.runtimeInstallErr = errors.New("checksum mismatch")
+	installFailed := run(t, []string{"runtime", "install", "10.0.12"}, backend, false, nil)
+	if installFailed.code != 1 || !strings.Contains(installFailed.stderr, "checksum mismatch") {
+		t.Errorf("install failure = %d %q", installFailed.code, installFailed.stderr)
+	}
+}
+
+func TestRuntimeRemoveHuman(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimeRemoval = install.Removal{
+		Product:   install.ProductRuntime,
+		Version:   "10.0.12",
+		RID:       "linux-x64",
+		Root:      "/home/u/.local/share/hilt/dotnet/runtimes/10.0.12",
+		RemovedAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+	}
+	result := run(t, []string{"runtime", "remove", "10.0.12"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Removed .NET runtime", "10.0.12", backend.runtimeRemoval.Root} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestRuntimeRemoveJSON(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimeRemoval = install.Removal{
+		Product:   install.ProductRuntime,
+		Version:   "10.0.12",
+		Root:      "/managed/runtimes/10.0.12",
+		RemovedAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC),
+	}
+	result := run(t, []string{"runtime", "remove", "10.0.12", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	var payload struct {
+		SchemaVersion int             `json:"schemaVersion"`
+		Removal       install.Removal `json:"removal"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, result.stdout)
+	}
+	if payload.SchemaVersion != 1 || payload.Removal.Version != "10.0.12" || payload.Removal.Root != "/managed/runtimes/10.0.12" {
+		t.Errorf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestRuntimeRemoveErrors(t *testing.T) {
+	invalid := run(t, []string{"runtime", "remove", "latest"}, populatedBackend(), false, nil)
+	if invalid.code != 2 || !strings.Contains(invalid.stderr, "invalid SDK version") {
+		t.Errorf("invalid version = %d %q", invalid.code, invalid.stderr)
+	}
+
+	backend := populatedBackend()
+	backend.runtimeRemoveErr = errors.New("runtime 10.0.12 is not installed")
+	failed := run(t, []string{"runtime", "remove", "10.0.12"}, backend, false, nil)
+	if failed.code != 1 || !strings.Contains(failed.stderr, "not installed") {
+		t.Errorf("remove failure = %d %q", failed.code, failed.stderr)
+	}
+}
+
+func TestRuntimeOutdatedHuman(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimeUpdates = []install.Update{
+		{Version: "10.0.12", LatestVersion: "10.0.14", Root: "/managed/runtimes/10.0.12", UpdateAvailable: true},
+		{Version: "9.0.12", LatestVersion: "9.0.12", Root: "/managed/runtimes/9.0.12"},
+	}
+	result := run(t, []string{"runtime", "outdated"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Runtime 10.0.12 -> 10.0.14", "/managed/runtimes/10.0.12"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+	if strings.Contains(result.stdout, "9.0.12") {
+		t.Errorf("up-to-date runtime listed as an update:\n%s", result.stdout)
+	}
+}
+
+func TestRuntimeOutdatedUpToDateAndEmpty(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimeUpdates = []install.Update{{Version: "10.0.12", LatestVersion: "10.0.12", Root: "/managed/runtimes/10.0.12"}}
+	result := run(t, []string{"runtime", "outdated"}, backend, false, nil)
+	if result.code != 0 || !strings.Contains(result.stdout, "All managed .NET runtimes are up to date") {
+		t.Errorf("result = %d %q", result.code, result.stdout)
+	}
+
+	empty := run(t, []string{"runtime", "outdated"}, populatedBackend(), false, nil)
+	if empty.code != 0 || !strings.Contains(empty.stdout, "No managed .NET runtimes installed") {
+		t.Errorf("result = %d %q", empty.code, empty.stdout)
+	}
+}
+
+func TestRuntimeOutdatedJSON(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimeUpdates = []install.Update{
+		{Version: "10.0.12", LatestVersion: "10.0.14", RID: "linux-x64", Root: "/managed/runtimes/10.0.12", UpdateAvailable: true},
+	}
+	result := run(t, []string{"runtime", "outdated", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	var payload struct {
+		SchemaVersion int              `json:"schemaVersion"`
+		Updates       []install.Update `json:"updates"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, result.stdout)
+	}
+	if payload.SchemaVersion != 1 || len(payload.Updates) != 1 || payload.Updates[0].LatestVersion != "10.0.14" {
+		t.Errorf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestRuntimeOutdatedErrors(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimeUpdatesErr = errors.New("runtime metadata unavailable")
+	result := run(t, []string{"runtime", "outdated"}, backend, false, nil)
+	if result.code != 1 || !strings.Contains(result.stderr, "runtime metadata unavailable") {
 		t.Errorf("result = %d %q", result.code, result.stderr)
 	}
 }

@@ -185,11 +185,62 @@ func printInstallResult(writer io.Writer, result install.Result) {
 }
 
 func printRemoval(writer io.Writer, removal install.Removal) {
+	product := "SDK"
+	if removal.Product == install.ProductRuntime {
+		product = "runtime"
+	}
 	if removal.Stale {
-		fmt.Fprintf(writer, "SDK %s was already missing; removed stale manifest entry for %s\n", removal.Version, removal.Root)
+		fmt.Fprintf(writer, "%s %s was already missing; removed stale manifest entry for %s\n", product, removal.Version, removal.Root)
 		return
 	}
-	fmt.Fprintf(writer, "Removed .NET SDK %s from %s\n", removal.Version, removal.Root)
+	fmt.Fprintf(writer, "Removed .NET %s %s from %s\n", product, removal.Version, removal.Root)
+}
+
+func printRuntimeInstallPlan(writer io.Writer, plan install.RuntimePlan) {
+	if plan.AlreadyInstalled {
+		fmt.Fprintln(writer, "Managed .NET runtime already installed")
+	} else {
+		fmt.Fprintln(writer, "Managed .NET runtime installation")
+	}
+	fmt.Fprintf(writer, "  Version      %s\n", plan.Version)
+	fmt.Fprintf(writer, "  RID          %s\n", plan.RID)
+	fmt.Fprintf(writer, "  Framework    %s (%s)\n", plan.Framework, strings.Join(plan.Frameworks, ", "))
+	if len(plan.Artifacts) > 0 && plan.Artifacts[0].URL != "" {
+		fmt.Fprintf(writer, "  Source       %s\n", plan.Artifacts[0].URL)
+	}
+	fmt.Fprintf(writer, "  Destination  %s\n", plan.Root)
+	if plan.SystemCopy {
+		fmt.Fprintln(writer, "  Note         this runtime version is also present in a non-managed root; Hilt will install a private copy")
+	}
+}
+
+func printRuntimeInstallResult(writer io.Writer, result install.RuntimeResult) {
+	if result.AlreadyInstalled {
+		fmt.Fprintf(writer, "Runtime %s is already installed at %s\n", result.Version, result.Root)
+		return
+	}
+	fmt.Fprintf(writer, "Installed .NET runtime %s at %s\n", result.Version, result.Root)
+	fmt.Fprintf(writer, "  Frameworks   %s\n", strings.Join(result.Frameworks, ", "))
+	fmt.Fprintf(writer, "  Verified with %s --list-runtimes\n", result.VerifiedWith)
+}
+
+func printRuntimeUpdates(writer io.Writer, updates []install.Update) {
+	if len(updates) == 0 {
+		fmt.Fprintln(writer, "No managed .NET runtimes installed.")
+		return
+	}
+	available := false
+	for _, update := range updates {
+		if !update.UpdateAvailable {
+			continue
+		}
+		available = true
+		fmt.Fprintf(writer, "Runtime %s -> %s\n", update.Version, update.LatestVersion)
+		fmt.Fprintf(writer, "  %s\n", update.Root)
+	}
+	if !available {
+		fmt.Fprintln(writer, "All managed .NET runtimes are up to date.")
+	}
 }
 
 func printUpdates(writer io.Writer, updates []install.Update) {

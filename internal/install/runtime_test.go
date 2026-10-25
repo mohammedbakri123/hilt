@@ -243,6 +243,9 @@ func TestRuntimePlanAndInstallNetCore(t *testing.T) {
 	if len(result.Artifacts) != 1 || result.Artifacts[0].Name != "dotnet-runtime-10.0.12-linux-x64.tar.gz" {
 		t.Errorf("result artifacts = %+v", result.Artifacts)
 	}
+	if !strings.Contains(result.VerifiedWith, ".staging") || !strings.HasSuffix(result.VerifiedWith, "/dotnet") {
+		t.Errorf("verifiedWith = %q, want staging dotnet host", result.VerifiedWith)
+	}
 	if _, err := os.Stat(filepath.Join(result.Root, "shared", RuntimeFrameworkNetCore, "10.0.12")); err != nil {
 		t.Fatalf("published shared framework missing: %v", err)
 	}

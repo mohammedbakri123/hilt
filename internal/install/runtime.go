@@ -92,6 +92,9 @@ type RuntimePlan struct {
 	Root             string            `json:"root"`
 	Artifacts        []RuntimeArtifact `json:"artifacts,omitempty"`
 	AlreadyInstalled bool              `json:"alreadyInstalled"`
+	// SystemCopy reports whether the same runtime version also exists in a
+	// non-managed root. Hilt never touches it.
+	SystemCopy bool `json:"systemCopy,omitempty"`
 }
 
 // RuntimeResult describes a completed or already-present managed runtime install.
@@ -104,6 +107,9 @@ type RuntimeResult struct {
 	Artifacts        []ArtifactRecord `json:"artifacts,omitempty"`
 	InstalledAt      time.Time        `json:"installedAt"`
 	AlreadyInstalled bool             `json:"alreadyInstalled"`
+	// VerifiedWith records the dotnet host that produced the --list-runtimes
+	// output used to verify the install.
+	VerifiedWith string `json:"verifiedWith,omitempty"`
 }
 
 // RuntimeRoot returns the managed install root for a runtime version.
@@ -298,8 +304,9 @@ func (i Installer) InstallRuntime(ctx context.Context, plan RuntimePlan, progres
 	}
 
 	progressf(progress, "Verifying staged runtime")
-	if err := i.verifyRuntime(ctx, staging, canonical, flavor.targetFrameworks()); err != nil {
-		return RuntimeResult{}, err
+	statement, verifyErr := i.verifyRuntime(ctx, staging, canonical, flavor.targetFrameworks())
+	if verifyErr != nil {
+		return RuntimeResult{}, verifyErr
 	}
 
 	if _, statErr := os.Lstat(finalRoot); statErr == nil {
@@ -348,13 +355,14 @@ func (i Installer) InstallRuntime(ctx context.Context, plan RuntimePlan, progres
 	}
 
 	return RuntimeResult{
-		Version:     canonical,
-		RID:         plan.RID,
-		Framework:   string(flavor),
-		Frameworks:  flavor.targetFrameworks(),
-		Root:        finalRoot,
-		Artifacts:   records,
-		InstalledAt: installedAt,
+		Version:      canonical,
+		RID:          plan.RID,
+		Framework:    string(flavor),
+		Frameworks:   flavor.targetFrameworks(),
+		Root:         finalRoot,
+		Artifacts:    records,
+		InstalledAt:  installedAt,
+		VerifiedWith: statement,
 	}, nil
 }
 
@@ -449,7 +457,8 @@ func (i Installer) RemoveRuntime(ctx context.Context, version string) (Removal, 
 // framework at the exact version through `dotnet --list-runtimes` with the
 // explicit toolchain environment. When the staged root has no usable dotnet
 // host, a host resolved by FindHost runs with DOTNET_ROOT pointed at staging.
-func (i Installer) verifyRuntime(ctx context.Context, root, version string, expected []string) error {
+// The returned string names the host that performed verification.
+func (i Installer) verifyRuntime(ctx context.Context, root, version string, expected []string) (string, error) {
 	runner := i.Runner
 	if runner == nil {
 		runner = process.ExecRunner{}
@@ -463,7 +472,7 @@ func (i Installer) verifyRuntime(ctx context.Context, root, version string, expe
 	if info, err := os.Stat(host); err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
 		fallback, found := i.host()
 		if !found {
-			return fmt.Errorf("staged runtime %s has no dotnet host and no alternate host was found to verify the installation", root)
+			return "", fmt.Errorf("staged runtime %s has no dotnet host and no alternate host was found to verify the installation", root)
 		}
 		host = fallback
 	}
@@ -475,11 +484,11 @@ func (i Installer) verifyRuntime(ctx context.Context, root, version string, expe
 		Env:  env,
 	})
 	if err != nil {
-		return fmt.Errorf("run staged dotnet --list-runtimes: %w", err)
+		return "", fmt.Errorf("run staged dotnet --list-runtimes: %w", err)
 	}
 	runtimes, err := dotnet.ParseRuntimeList(result.Stdout, root)
 	if err != nil {
-		return fmt.Errorf("parse staged dotnet --list-runtimes: %w", err)
+		return "", fmt.Errorf("parse staged dotnet --list-runtimes: %w", err)
 	}
 	present := make(map[string]map[string]bool)
 	for _, runtime := range runtimes {
@@ -492,10 +501,10 @@ func (i Installer) verifyRuntime(ctx context.Context, root, version string, expe
 	}
 	for _, framework := range expected {
 		if !present[framework][version] {
-			return fmt.Errorf("staged runtime %s did not report %s %s in --list-runtimes", root, framework, version)
+			return "", fmt.Errorf("staged runtime %s did not report %s %s in --list-runtimes", root, framework, version)
 		}
 	}
-	return nil
+	return host, nil
 }
 
 // CheckRuntimeUpdates checks manifest-owned runtimes for newer stable releases

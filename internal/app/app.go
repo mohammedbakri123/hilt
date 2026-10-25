@@ -160,7 +160,7 @@ func (a *App) InstallSDK(ctx context.Context, plan install.Plan, progress io.Wri
 func (a *App) RemoveSDK(ctx context.Context, version string) (install.Removal, error) {
 	removal, err := a.installer().Remove(ctx, version)
 	if err != nil {
-		return install.Removal{}, a.removalError(ctx, version, err)
+		return install.Removal{}, a.removalError(ctx, install.ProductSDK, version, err)
 	}
 	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
 		a.locator.Ownership = manifest
@@ -168,7 +168,59 @@ func (a *App) RemoveSDK(ctx context.Context, version string) (install.Removal, e
 	return removal, nil
 }
 
-func (a *App) removalError(ctx context.Context, version string, cause error) error {
+// CheckSDKUpdates checks manifest-owned SDKs for newer stable releases.
+func (a *App) CheckSDKUpdates(ctx context.Context) ([]install.Update, error) {
+	return a.installer().CheckUpdates(ctx)
+}
+
+// PlanRuntimeInstall resolves a managed runtime install without downloading it.
+func (a *App) PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor) (install.RuntimePlan, error) {
+	plan, err := a.installer().PlanRuntime(ctx, version, framework)
+	if err != nil {
+		return install.RuntimePlan{}, err
+	}
+	inventory, inventoryErr := a.Inventory(ctx)
+	if inventoryErr == nil {
+		for _, runtime := range inventory.Runtimes {
+			if runtime.Version == plan.Version && !runtime.Managed {
+				plan.SystemCopy = true
+				break
+			}
+		}
+	}
+	return plan, nil
+}
+
+// InstallRuntime downloads, verifies, and publishes a managed runtime.
+func (a *App) InstallRuntime(ctx context.Context, plan install.RuntimePlan, progress io.Writer) (install.RuntimeResult, error) {
+	result, err := a.installer().InstallRuntime(ctx, plan, progress)
+	if err != nil {
+		return install.RuntimeResult{}, err
+	}
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+		a.locator.Ownership = manifest
+	}
+	return result, nil
+}
+
+// RemoveRuntime removes a manifest-owned managed runtime.
+func (a *App) RemoveRuntime(ctx context.Context, version string) (install.Removal, error) {
+	removal, err := a.installer().RemoveRuntime(ctx, version)
+	if err != nil {
+		return install.Removal{}, a.removalError(ctx, install.ProductRuntime, version, err)
+	}
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+		a.locator.Ownership = manifest
+	}
+	return removal, nil
+}
+
+// CheckRuntimeUpdates checks manifest-owned runtimes for newer stable releases.
+func (a *App) CheckRuntimeUpdates(ctx context.Context) ([]install.Update, error) {
+	return a.installer().CheckRuntimeUpdates(ctx)
+}
+
+func (a *App) removalError(ctx context.Context, product install.ProductKind, version string, cause error) error {
 	var notInstalled *install.NotInstalledError
 	var notOwned *install.NotOwnedError
 	if !errors.As(cause, &notInstalled) && !errors.As(cause, &notOwned) {
@@ -181,6 +233,25 @@ func (a *App) removalError(ctx context.Context, version string, cause error) err
 	canonical := parsed.String()
 	inventory, inventoryErr := a.Inventory(ctx)
 	if inventoryErr != nil {
+		return cause
+	}
+	if product == install.ProductRuntime {
+		for _, runtime := range inventory.Runtimes {
+			if runtime.Version == canonical && runtime.EffectiveProvenance() == dotnet.ProvenanceManaged {
+				return fmt.Errorf("runtime %s at %s is under the managed root but is not recorded in Hilt's install manifest; refusing to remove it", canonical, runtime.Root)
+			}
+		}
+		for _, runtime := range inventory.Runtimes {
+			if runtime.Version != canonical {
+				continue
+			}
+			switch runtime.EffectiveProvenance() {
+			case dotnet.ProvenanceSystem:
+				return fmt.Errorf("runtime %s is provided by the system at %s; Hilt only removes managed runtimes", canonical, runtime.Root)
+			case dotnet.ProvenanceExternal:
+				return fmt.Errorf("runtime %s is provided by an external installation at %s; Hilt only removes managed runtimes", canonical, runtime.Root)
+			}
+		}
 		return cause
 	}
 	for _, sdk := range inventory.SDKs {
@@ -202,9 +273,11 @@ func (a *App) removalError(ctx context.Context, version string, cause error) err
 	return cause
 }
 
-// CheckSDKUpdates checks manifest-owned SDKs for newer stable releases.
-func (a *App) CheckSDKUpdates(ctx context.Context) ([]install.Update, error) {
-	return a.installer().CheckUpdates(ctx)
+func productLabel(product install.ProductKind) string {
+	if product == install.ProductRuntime {
+		return "runtime"
+	}
+	return "SDK"
 }
 
 func (a *App) installer() install.Installer {
@@ -213,6 +286,9 @@ func (a *App) installer() install.Installer {
 		ManifestPath: a.paths.InstallManifestFile(),
 		LockPath:     a.paths.InstallLockFile(),
 		Runner:       a.runner,
+		FindHost: func() (string, bool) {
+			return a.Tool("dotnet")
+		},
 	}
 }
 
