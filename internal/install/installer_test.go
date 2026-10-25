@@ -239,8 +239,11 @@ func TestInstallerInstallThenRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Find(result.Version) != nil || manifest.Owns(result.Root, result.Version) {
+	if manifest.Find(ProductSDK, result.Version) != nil || manifest.Owns(result.Root, result.Version) {
 		t.Error("manifest still owns removed SDK")
+	}
+	if manifest.Find(ProductRuntime, result.Version) != nil {
+		t.Error("runtime entry unexpectedly affected by SDK removal")
 	}
 }
 
@@ -471,6 +474,34 @@ func addManifestEntry(t *testing.T, installer Installer, version string) {
 	}
 }
 
+func addRuntimeManifestEntry(t *testing.T, installer Installer, version string) {
+	t.Helper()
+	manifest, err := Load(installer.ManifestPath, installer.ManagedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha512.Sum512([]byte("archive"))
+	if err := manifest.Add(testRuntimeEntry(version, hash[:])); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Save(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createRuntimeRoot(t *testing.T, installer Installer, version string) string {
+	t.Helper()
+	root := filepath.Join(installer.ManagedRoot, "runtimes", version)
+	framework := filepath.Join(root, "shared", "Microsoft.NETCore.App", version)
+	if err := os.MkdirAll(framework, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dotnet"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func TestInstallerRemoveOwned(t *testing.T) {
 	installer := testRemovalInstaller(t)
 	version := "10.0.100"
@@ -491,7 +522,7 @@ func TestInstallerRemoveOwned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Find(version) != nil {
+	if manifest.Find(ProductSDK, version) != nil {
 		t.Error("manifest entry still present")
 	}
 }
@@ -519,8 +550,60 @@ func TestInstallerRemoveStaleEntryKeepsUnrelatedDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Find(version) != nil {
+	if manifest.Find(ProductSDK, version) != nil {
 		t.Error("stale manifest entry still present")
+	}
+}
+
+func TestInstallerRemoveDoesNotTouchUnownedRuntimeRoot(t *testing.T) {
+	installer := testRemovalInstaller(t)
+	runtimeRoot := createRuntimeRoot(t, installer, "10.0.12")
+
+	_, err := installer.Remove(context.Background(), "10.0.12")
+	var notInstalled *NotInstalledError
+	if !errors.As(err, &notInstalled) {
+		t.Fatalf("error = %v, want not installed", err)
+	}
+	if _, statErr := os.Stat(runtimeRoot); statErr != nil {
+		t.Errorf("unowned runtime root removed: %v", statErr)
+	}
+	manifest, err := Load(installer.ManifestPath, installer.ManagedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Installs) != 0 {
+		t.Errorf("manifest entries = %d, want 0", len(manifest.Installs))
+	}
+}
+
+func TestInstallerSDKAndRuntimeSameVersionCoexist(t *testing.T) {
+	installer := testRemovalInstaller(t)
+	version := "10.0.12"
+	createInstalledRoot(t, installer, version)
+	addManifestEntry(t, installer, version)
+	runtimeRoot := createRuntimeRoot(t, installer, version)
+	addRuntimeManifestEntry(t, installer, version)
+
+	removal, err := installer.Remove(context.Background(), version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removal.Version != version || removal.Root != filepath.Join(installer.ManagedRoot, version) {
+		t.Errorf("removal = %+v", removal)
+	}
+	if _, statErr := os.Stat(runtimeRoot); statErr != nil {
+		t.Errorf("runtime root removed alongside same-version SDK: %v", statErr)
+	}
+	manifest, err := Load(installer.ManifestPath, installer.ManagedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Find(ProductRuntime, version) == nil {
+		t.Error("runtime entry removed by SDK removal")
+	}
+	roots := manifest.ManagedRoots()
+	if len(roots) != 1 || roots[0] != runtimeRoot {
+		t.Errorf("remaining roots = %v, want %s", roots, runtimeRoot)
 	}
 }
 
@@ -566,7 +649,7 @@ func TestInstallerRemoveFailureKeepsManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Find(version) == nil {
+	if manifest.Find(ProductSDK, version) == nil {
 		t.Error("manifest entry removed after failed removal")
 	}
 }
@@ -596,6 +679,8 @@ func TestInstallerCheckUpdates(t *testing.T) {
 		addManifestEntry(t, installer, version)
 	}
 	addManifestEntry(t, installer, "8.0.100")
+	createRuntimeRoot(t, installer, "10.0.12")
+	addRuntimeManifestEntry(t, installer, "10.0.12")
 
 	updates, err := installer.CheckUpdates(context.Background())
 	if err != nil {
@@ -616,6 +701,9 @@ func TestInstallerCheckUpdates(t *testing.T) {
 	}
 	if _, ok := byVersion["8.0.100"]; ok {
 		t.Error("stale entry was included in update check")
+	}
+	if _, ok := byVersion["10.0.12"]; ok {
+		t.Error("runtime entry was included in SDK update check")
 	}
 	mu.Lock()
 	defer mu.Unlock()

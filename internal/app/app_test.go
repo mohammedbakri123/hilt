@@ -81,6 +81,7 @@ func TestNewDiscoversManifestManagedRoot(t *testing.T) {
 	}
 	hash := sha512.Sum512([]byte("archive"))
 	if err := manifest.Add(install.Entry{
+		Product:   install.ProductSDK,
 		Version:   "10.0.100",
 		RID:       "linux-x64",
 		Root:      "10.0.100",
@@ -176,6 +177,7 @@ func writeManifestEntry(t *testing.T, manifestPath, managedRoot, version string)
 	}
 	hash := sha512.Sum512([]byte("archive"))
 	if err := manifest.Add(install.Entry{
+		Product:   install.ProductSDK,
 		Version:   version,
 		RID:       "linux-x64",
 		Root:      version,

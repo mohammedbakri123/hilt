@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -136,7 +137,7 @@ func (i Installer) Plan(ctx context.Context, version string) (Plan, error) {
 	}
 
 	canonical := parsed.String()
-	if entry := manifest.Find(canonical); entry != nil {
+	if entry := manifest.Find(ProductSDK, canonical); entry != nil {
 		root := manifest.RootFor(*entry)
 		info, statErr := os.Stat(root)
 		if statErr != nil || !info.IsDir() || !usableRoot(root, canonical) {
@@ -195,6 +196,11 @@ func (i Installer) CheckUpdates(ctx context.Context) ([]Update, error) {
 	latestByChannel := make(map[string]dotnet.Version)
 	updates := make([]Update, 0, len(manifest.Installs))
 	for _, entry := range manifest.Installs {
+		if entry.Product != ProductSDK {
+			// Runtime entries are checked by the runtime update flow; an
+			// SDK channel lookup would misresolve runtime versions.
+			continue
+		}
 		root := manifest.RootFor(entry)
 		info, statErr := os.Stat(root)
 		if statErr != nil || !info.IsDir() || !usableRoot(root, entry.Version) {
@@ -259,7 +265,7 @@ func (i Installer) Install(ctx context.Context, plan Plan, progress io.Writer) (
 		return Result{}, err
 	}
 	canonical := parsed.String()
-	if entry := manifest.Find(canonical); entry != nil {
+	if entry := manifest.Find(ProductSDK, canonical); entry != nil {
 		root := manifest.RootFor(*entry)
 		info, statErr := os.Stat(root)
 		if statErr != nil || !info.IsDir() || !usableRoot(root, canonical) {
@@ -346,11 +352,17 @@ func (i Installer) Install(ctx context.Context, plan Plan, progress io.Writer) (
 
 	installedAt := i.now().UTC()
 	entry := Entry{
-		Version:     canonical,
-		RID:         plan.RID,
-		Root:        canonical,
-		SourceURL:   plan.SourceURL,
-		SHA512:      FormatSHA512(expected),
+		Product:   ProductSDK,
+		Version:   canonical,
+		RID:       plan.RID,
+		Root:      canonical,
+		SourceURL: plan.SourceURL,
+		SHA512:    FormatSHA512(expected),
+		Artifacts: []ArtifactRecord{{
+			Name:   artifactName(plan.FileName, plan.SourceURL),
+			URL:    plan.SourceURL,
+			SHA512: FormatSHA512(expected),
+		}},
 		InstalledAt: installedAt,
 	}
 	if err := manifest.Add(entry); err != nil {
@@ -399,7 +411,7 @@ func (i Installer) Remove(ctx context.Context, version string) (Removal, error) 
 		return Removal{}, err
 	}
 	canonical := parsed.String()
-	entry := manifest.Find(canonical)
+	entry := manifest.Find(ProductSDK, canonical)
 	if entry == nil {
 		root := filepath.Join(managedRoot, canonical)
 		if _, statErr := os.Lstat(root); statErr == nil {
@@ -416,7 +428,7 @@ func (i Installer) Remove(ctx context.Context, version string) (Removal, error) 
 	}
 	info, err := os.Lstat(root)
 	if errors.Is(err, os.ErrNotExist) {
-		if _, removed := manifest.Remove(canonical); !removed {
+		if _, removed := manifest.Remove(ProductSDK, canonical); !removed {
 			return Removal{}, fmt.Errorf("SDK %s disappeared from the install manifest during removal", canonical)
 		}
 		if err := manifest.Save(); err != nil {
@@ -448,7 +460,7 @@ func (i Installer) Remove(ctx context.Context, version string) (Removal, error) 
 		return Removal{}, fmt.Errorf("remove SDK directory: %w", err)
 	}
 
-	if _, removed := manifest.Remove(canonical); !removed {
+	if _, removed := manifest.Remove(ProductSDK, canonical); !removed {
 		return Removal{}, fmt.Errorf("SDK %s disappeared from the install manifest during removal", canonical)
 	}
 	if err := manifest.Save(); err != nil {
@@ -734,4 +746,16 @@ func valueOr(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func artifactName(fileName, rawURL string) string {
+	if trimmed := strings.TrimSpace(fileName); trimmed != "" {
+		return trimmed
+	}
+	if parsed, err := url.Parse(rawURL); err == nil {
+		if base := path.Base(parsed.Path); base != "" && base != "/" && base != "." {
+			return base
+		}
+	}
+	return rawURL
 }

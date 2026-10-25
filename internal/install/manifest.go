@@ -12,20 +12,55 @@ import (
 )
 
 // ManifestSchemaVersion is the current install manifest schema.
-const ManifestSchemaVersion = 1
+const ManifestSchemaVersion = 2
 
-// Entry records one managed SDK installation.
-type Entry struct {
-	Version     string    `json:"version"`
-	RID         string    `json:"rid"`
-	Root        string    `json:"root"`
-	SourceURL   string    `json:"sourceUrl"`
-	SHA512      string    `json:"sha512"`
-	InstalledAt time.Time `json:"installedAt"`
+// ProductKind names the managed product recorded by a manifest entry.
+type ProductKind string
+
+const (
+	// ProductSDK records a managed .NET SDK installation.
+	ProductSDK ProductKind = "sdk"
+	// ProductRuntime records a managed .NET runtime installation.
+	ProductRuntime ProductKind = "runtime"
+)
+
+// Valid reports whether the product kind is one of the supported products.
+func (p ProductKind) Valid() bool {
+	return p == ProductSDK || p == ProductRuntime
 }
 
-// Manifest is Hilt's record of managed SDK installations. Roots are stored
-// relative to the configured managed root so the manifest stays self-contained.
+// label renders a human-readable product name for diagnostics.
+func (p ProductKind) label() string {
+	if p == ProductRuntime {
+		return "runtime"
+	}
+	return "SDK"
+}
+
+// ArtifactRecord records one downloaded archive behind an installation.
+type ArtifactRecord struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	SHA512 string `json:"sha512"`
+}
+
+// Entry records one managed SDK or runtime installation.
+type Entry struct {
+	Product     ProductKind      `json:"product"`
+	Version     string           `json:"version"`
+	RID         string           `json:"rid"`
+	Root        string           `json:"root"`
+	SourceURL   string           `json:"sourceUrl"`
+	SHA512      string           `json:"sha512"`
+	Artifacts   []ArtifactRecord `json:"artifacts,omitempty"`
+	Frameworks  []string         `json:"frameworks,omitempty"`
+	InstalledAt time.Time        `json:"installedAt"`
+}
+
+// Manifest is Hilt's record of managed SDK and runtime installations. Roots are
+// stored relative to the configured managed root so the manifest stays
+// self-contained. Entries are keyed by product and version: an SDK and a
+// runtime may share the same version.
 type Manifest struct {
 	SchemaVersion int     `json:"schemaVersion"`
 	Installs      []Entry `json:"installs"`
@@ -63,14 +98,19 @@ func Load(path, managedRoot string) (*Manifest, error) {
 	manifest.Installs = make([]Entry, 0, len(stored.Installs))
 	seen := make(map[string]bool)
 	for _, entry := range stored.Installs {
+		if stored.SchemaVersion < ManifestSchemaVersion && entry.Product == "" {
+			// Schema 1 recorded only SDKs; migrate those entries.
+			entry.Product = ProductSDK
+		}
 		normalized, err := normalizeEntry(entry, manifest.managedRoot)
 		if err != nil {
 			return nil, fmt.Errorf("install manifest %s: %w", path, err)
 		}
-		if seen[normalized.Version] {
-			return nil, fmt.Errorf("install manifest %s: duplicate entry for SDK %s", path, normalized.Version)
+		key := entryKey(normalized.Product, normalized.Version)
+		if seen[key] {
+			return nil, fmt.Errorf("install manifest %s: duplicate entry for %s %s", path, normalized.Product.label(), normalized.Version)
 		}
-		seen[normalized.Version] = true
+		seen[key] = true
 		manifest.Installs = append(manifest.Installs, normalized)
 	}
 	return manifest, nil
@@ -96,15 +136,21 @@ func (m *Manifest) ManagedRoot() string {
 	return m.managedRoot
 }
 
-// Find returns the entry for an exact version.
-func (m *Manifest) Find(version string) *Entry {
+// entryKey builds the (product, version) key used for duplicate detection.
+func entryKey(product ProductKind, version string) string {
+	return string(product) + "\x00" + version
+}
+
+// Find returns the entry for an exact product and version.
+func (m *Manifest) Find(product ProductKind, version string) *Entry {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for index := range m.Installs {
-		if m.Installs[index].Version == version {
-			entry := m.Installs[index]
-			return &entry
+		if m.Installs[index].Product != product || m.Installs[index].Version != version {
+			continue
 		}
+		entry := m.Installs[index]
+		return &entry
 	}
 	return nil
 }
@@ -120,12 +166,12 @@ func (m *Manifest) rootFor(entry Entry) string {
 	return filepath.Join(m.managedRoot, filepath.FromSlash(entry.Root))
 }
 
-// Remove deletes the entry for an exact version.
-func (m *Manifest) Remove(version string) (Entry, bool) {
+// Remove deletes the entry for an exact product and version.
+func (m *Manifest) Remove(product ProductKind, version string) (Entry, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for index := range m.Installs {
-		if m.Installs[index].Version != version {
+		if m.Installs[index].Product != product || m.Installs[index].Version != version {
 			continue
 		}
 		removed := m.Installs[index]
@@ -135,7 +181,7 @@ func (m *Manifest) Remove(version string) (Entry, bool) {
 	return Entry{}, false
 }
 
-// Add appends a validated entry.
+// Add appends a validated entry keyed by product and version.
 func (m *Manifest) Add(entry Entry) error {
 	normalized, err := normalizeEntry(entry, m.managedRoot)
 	if err != nil {
@@ -144,8 +190,8 @@ func (m *Manifest) Add(entry Entry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, existing := range m.Installs {
-		if existing.Version == normalized.Version {
-			return fmt.Errorf("SDK %s is already recorded in the install manifest", normalized.Version)
+		if existing.Product == normalized.Product && existing.Version == normalized.Version {
+			return fmt.Errorf("%s %s is already recorded in the install manifest", normalized.Product.label(), normalized.Version)
 		}
 	}
 	m.Installs = append(m.Installs, normalized)
@@ -153,6 +199,8 @@ func (m *Manifest) Add(entry Entry) error {
 }
 
 // Owns reports whether a root and, when non-empty, a version are recorded.
+// Ownership is product-agnostic: SDK and runtime roots differ, so the root
+// alone disambiguates the product.
 func (m *Manifest) Owns(root, version string) bool {
 	if m == nil || root == "" {
 		return false
@@ -243,6 +291,10 @@ func (m *Manifest) Save() error {
 }
 
 func normalizeEntry(entry Entry, managedRoot string) (Entry, error) {
+	product := entry.Product
+	if !product.Valid() {
+		return Entry{}, fmt.Errorf("product must be %q or %q, got %q", ProductSDK, ProductRuntime, string(product))
+	}
 	version, err := ValidateVersion(entry.Version)
 	if err != nil {
 		return Entry{}, err
@@ -250,35 +302,89 @@ func normalizeEntry(entry Entry, managedRoot string) (Entry, error) {
 	entry.Version = version.String()
 
 	if strings.TrimSpace(entry.RID) == "" {
-		return Entry{}, fmt.Errorf("SDK %s: RID is empty", entry.Version)
+		return Entry{}, fmt.Errorf("%s %s: RID is empty", product.label(), entry.Version)
 	}
 	if strings.TrimSpace(entry.SourceURL) == "" {
-		return Entry{}, fmt.Errorf("SDK %s: source URL is empty", entry.Version)
+		return Entry{}, fmt.Errorf("%s %s: source URL is empty", product.label(), entry.Version)
 	}
 	hash, err := ParseSHA512(entry.SHA512)
 	if err != nil {
-		return Entry{}, fmt.Errorf("SDK %s: %w", entry.Version, err)
+		return Entry{}, fmt.Errorf("%s %s: %w", product.label(), entry.Version, err)
 	}
 	entry.SHA512 = FormatSHA512(hash)
 
 	root := strings.TrimSpace(entry.Root)
 	if root == "" {
-		return Entry{}, fmt.Errorf("SDK %s: root is empty", entry.Version)
+		return Entry{}, fmt.Errorf("%s %s: root is empty", product.label(), entry.Version)
 	}
 	if filepath.IsAbs(root) {
-		return Entry{}, fmt.Errorf("SDK %s: root must be relative to the managed root", entry.Version)
+		return Entry{}, fmt.Errorf("%s %s: root must be relative to the managed root", product.label(), entry.Version)
 	}
 	root = filepath.Clean(filepath.FromSlash(root))
 	if root == "." || root == ".." || strings.HasPrefix(root, ".."+string(filepath.Separator)) {
-		return Entry{}, fmt.Errorf("SDK %s: root escapes the managed root", entry.Version)
+		return Entry{}, fmt.Errorf("%s %s: root escapes the managed root", product.label(), entry.Version)
 	}
 	absolute := filepath.Join(managedRoot, root)
 	if !withinRoot(managedRoot, absolute) {
-		return Entry{}, fmt.Errorf("SDK %s: root escapes the managed root", entry.Version)
+		return Entry{}, fmt.Errorf("%s %s: root escapes the managed root", product.label(), entry.Version)
 	}
-	if filepath.ToSlash(root) != entry.Version {
-		return Entry{}, fmt.Errorf("SDK %s: root %q must match the SDK version", entry.Version, entry.Root)
+	if product == ProductSDK {
+		if filepath.ToSlash(root) != entry.Version {
+			return Entry{}, fmt.Errorf("SDK %s: root %q must match the SDK version", entry.Version, entry.Root)
+		}
+	} else {
+		if filepath.ToSlash(root) != "runtimes/"+entry.Version {
+			return Entry{}, fmt.Errorf("runtime %s: root %q must match runtimes/<version>", entry.Version, entry.Root)
+		}
 	}
 	entry.Root = filepath.ToSlash(root)
+
+	frameworks, err := normalizeFrameworks(entry.Product, entry.Frameworks)
+	if err != nil {
+		return Entry{}, fmt.Errorf("%s %s: %w", product.label(), entry.Version, err)
+	}
+	entry.Frameworks = frameworks
+
+	artifacts := make([]ArtifactRecord, 0, len(entry.Artifacts))
+	for _, artifact := range entry.Artifacts {
+		if strings.TrimSpace(artifact.Name) == "" {
+			return Entry{}, fmt.Errorf("%s %s: artifact name is empty", product.label(), entry.Version)
+		}
+		if strings.TrimSpace(artifact.URL) == "" {
+			return Entry{}, fmt.Errorf("%s %s: artifact %s URL is empty", product.label(), entry.Version, artifact.Name)
+		}
+		hash, err := ParseSHA512(artifact.SHA512)
+		if err != nil {
+			return Entry{}, fmt.Errorf("%s %s: artifact %s: %w", product.label(), entry.Version, artifact.Name, err)
+		}
+		artifact.Name = strings.TrimSpace(artifact.Name)
+		artifact.URL = strings.TrimSpace(artifact.URL)
+		artifact.SHA512 = FormatSHA512(hash)
+		artifacts = append(artifacts, artifact)
+	}
+	entry.Artifacts = artifacts
 	return entry, nil
+}
+
+func normalizeFrameworks(product ProductKind, frameworks []string) ([]string, error) {
+	if len(frameworks) > 0 && product == ProductSDK {
+		return nil, fmt.Errorf("frameworks are only valid for runtime entries")
+	}
+	cleaned := make([]string, 0, len(frameworks))
+	seen := make(map[string]bool, len(frameworks))
+	for _, framework := range frameworks {
+		trimmed := strings.TrimSpace(framework)
+		if trimmed == "" {
+			return nil, fmt.Errorf("framework is empty")
+		}
+		if seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		cleaned = append(cleaned, trimmed)
+	}
+	if len(cleaned) == 0 {
+		return nil, nil
+	}
+	return cleaned, nil
 }
