@@ -1,18 +1,34 @@
 # Roadmap
 
-Phase 1 is complete. The phases below are planned, not implemented. Commands for
-them are not registered and screens state that they are placeholders.
+Phase 1 is complete. The managed-SDK portion of Phase 2 is implemented; the
+remaining Phase 2 items and later phases are planned, not implemented. Commands
+that do not work are not registered, and screens state that they are
+placeholders.
 
-## Phase 2 — SDK and runtime installation
+## Phase 2 — Managed SDKs (partially implemented)
 
-- Microsoft release metadata with caching and offline fallback.
-- `dotnet-install.sh` downloaded to a temporary file, inspected, and executed
-  without piping to a shell.
-- Explicit version resolution and a user-owned installation directory.
-- Verification through the installed `dotnet --info`.
-- Managed-install manifest; removal only for Hilt-managed roots.
+Implemented:
+
+- Official Microsoft release metadata with explicit network access.
+- Direct `.tar.gz` downloads for the host RID, restricted to Microsoft HTTPS
+  hosts, with size limits and SHA-512 verification.
+- Exact stable version resolution and per-version, user-owned installation
+  directories under `<data>/hilt/dotnet`.
+- Staged installation verified through the installed `dotnet --list-sdks` and
+  `dotnet --info` with an explicit environment.
+- Atomic publish, idempotent installs, install locking, and cleanup on failure.
+- Managed-install manifest; removal only for manifest-owned roots.
+- `hilt sdk install`, `hilt sdk remove`, and `hilt sdk outdated` with JSON
+  output.
+- Explicit same-channel update checks; no automatic updates.
+- Read-wide discovery with no `sudo`, package-manager writes, or `PATH` edits.
+
+Remaining:
+
+- Runtime installation, removal, and update checks.
+- Applying SDK updates, plus channels, aliases, and prerelease policies.
+- TUI install/remove controls.
 - Arch/CachyOS pacman adapter with availability checks and explicit approval.
-- Never silent `sudo`; no automatic `PATH` changes.
 
 ## Phase 3 — Projects and execution
 

@@ -14,6 +14,7 @@ internal/tui             Bubble Tea model, screens, rendering
 internal/config          versioned JSON configuration with atomic saves
 internal/diagnostics     doctor engine and findings
 internal/dotnet          discovery, probing, inventory, global.json, versions
+internal/install         release metadata, archives, manifest, install/remove
 internal/platform        OS/distro detection, XDG paths, package managers
 internal/process         external command execution with contexts and groups
 ```
@@ -27,8 +28,11 @@ cmd/hilt
   │     ├── internal/diagnostics
   │     ├── internal/dotnet
   │     │     └── internal/process
+  │     ├── internal/install
+  │     │     ├── internal/dotnet
+  │     │     └── internal/process
   │     └── internal/platform
-  ├── internal/cli ──► internal/{config,diagnostics,dotnet,platform}
+  ├── internal/cli ──► internal/{config,diagnostics,dotnet,install,platform}
   └── internal/tui ──► internal/{config,diagnostics,dotnet,platform}
 ```
 
@@ -36,6 +40,9 @@ cmd/hilt
   interfaces. Both are satisfied by `*internal/app.App`.
 - `internal/dotnet` depends on `internal/process` for probing, but parsers and
   filesystem scanning are independent of the process layer.
+- `internal/install` owns all network, archive, manifest, and managed-root
+  mutation logic. It depends on `internal/dotnet` for versions, RIDs, parsing,
+  and the explicit toolchain environment.
 - `internal/platform` and `internal/config` do not import higher-level packages.
 - No package imports `internal/app`, which prevents composition cycles.
 
@@ -43,13 +50,20 @@ cmd/hilt
 
 1. `main` creates a signal-aware context and constructs `app.New`.
 2. `app.New` detects the platform, resolves XDG paths, loads configuration, and
-   wires the process runner, locator, prober, and package-manager lookup.
+   wires the process runner, locator, prober, package-manager lookup, and
+   install manifest. The manifest supplies ownership and managed roots to the
+   locator.
 3. The CLI either runs a non-interactive command or hands the backend to the
    TUI.
 4. Discovery runs in `tea.Cmd` / CLI command context, never in the TUI update
    loop. Missing .NET is represented as an empty inventory plus warnings.
 5. Diagnostics reuses the inventory and adds configuration, `global.json`,
    package-manager, git, and managed-root findings.
+6. `hilt sdk install` resolves metadata, downloads and verifies an archive,
+   stages and verifies the toolchain, publishes it atomically, then records it
+   in the manifest. `hilt sdk remove` reverses that only for manifest-owned
+   roots. `hilt sdk outdated` reads metadata and reports newer same-channel
+   stable versions. The TUI remains read-only for managed mutations.
 
 ## Contracts
 
@@ -57,11 +71,20 @@ cmd/hilt
 - Every command takes a `context.Context`; cancellation kills the process group.
 - Parsers are exported so captured .NET output can be tested without .NET.
 - Configuration saves are atomic, mode `0600`, and preserve unknown fields.
+- The install manifest uses `schemaVersion: 1`, stores roots relative to the
+  managed root, and is written atomically with mode `0600`.
+- Managed SDKs live at `<managedRoot>/<version>`. Ownership comes from the
+  manifest, not from the path alone.
+- Install and removal operations are serialized by `installs.lock`.
+- Network access is confined to `internal/install`; ordinary tests use local
+  HTTP servers.
 - JSON payloads carry `schemaVersion: 1`.
 
 ## Testing seams
 
 `Locator`, `Prober`, `process.Runner`, `LookPath`, `Stat`, environment lookup,
-and clock-free parsers are injectable. Unit tests use temporary directory
-trees, fake probers, and captured fixtures under `tests/testdata`. A real .NET
-integration test is opt-in through `HILT_TEST_REAL_DOTNET=1`.
+clock-free parsers, `install.ReleaseClient`, `HTTPClient`, `ValidateURL`,
+`RemoveAll`, and `Now` are injectable. Unit tests use temporary directory trees,
+fake probers and runners, captured fixtures under `tests/testdata`, and local
+metadata/archive servers. A real .NET integration test is opt-in through
+`HILT_TEST_REAL_DOTNET=1`.

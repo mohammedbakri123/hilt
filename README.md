@@ -4,21 +4,38 @@ Hilt is a terminal UI and CLI for managing the .NET ecosystem on Linux. It is a
 standalone Go executable: it starts and reports useful information even when no
 .NET runtime or SDK is installed.
 
-## Phase 1 status
+## Status
 
-Phase 1 is implemented:
+Phase 1 and the managed-SDK portion of Phase 2 are implemented.
+
+Phase 1 provides:
 
 - Full-screen TUI with Dashboard, SDKs & Runtimes, Diagnostics, and Settings.
 - .NET host discovery from `DOTNET_ROOT`, `PATH`, known roots, and the managed
   root.
-- SDK and shared-runtime inventory with provenance and managed classification.
+- SDK and shared-runtime inventory with provenance, ownership, and selection.
 - `hilt doctor` with human and JSON output.
-- `hilt sdk list`, `hilt runtime list`, and `hilt version` with JSON output.
+- `hilt sdk list`, `hilt sdk which`, `hilt runtime list`, and `hilt version`
+  with JSON output.
 - XDG configuration loading with corrupt-file preservation.
 
-Not implemented in Phase 1: installation, removal, project scanning, builds,
-NuGet operations, and templates. The corresponding screens say so explicitly.
-See [docs/roadmap.md](docs/roadmap.md).
+Phase 2 managed SDKs provide:
+
+- `hilt sdk install <version>` from official Microsoft release metadata.
+- SHA-512 verification, archive limits, staging, and verification through the
+  installed `dotnet`.
+- Per-version roots under the Hilt-managed root, recorded in an install
+  manifest.
+- `hilt sdk remove <version>` only for manifest-owned installations.
+- `hilt sdk outdated` for explicit same-channel update checks. Hilt never
+  updates automatically.
+- Read-wide discovery with write-private mutations: system and external SDKs
+  are never modified or removed, and Hilt never uses `sudo` or edits `PATH`.
+
+Not implemented: runtime installation, applying SDK updates, TUI install/remove
+controls, package-manager writes, project scanning, builds, NuGet operations,
+and templates. The corresponding screens say so explicitly. See
+[docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 
@@ -26,6 +43,8 @@ See [docs/roadmap.md](docs/roadmap.md).
 - Go 1.26 or newer to build.
 - A terminal for the interactive TUI. The CLI works without one.
 - .NET is optional.
+- Managed installation and update checks require network access to Microsoft
+  release metadata.
 
 ## Build
 
@@ -48,6 +67,14 @@ bin/hilt doctor
 bin/hilt doctor --json
 bin/hilt sdk list
 bin/hilt sdk list --json
+bin/hilt sdk which
+bin/hilt sdk which --json
+bin/hilt sdk install <version>
+bin/hilt sdk install <version> --json
+bin/hilt sdk remove <version>
+bin/hilt sdk remove <version> --json
+bin/hilt sdk outdated
+bin/hilt sdk outdated --json
 bin/hilt runtime list
 bin/hilt version
 ```
@@ -55,12 +82,22 @@ bin/hilt version
 `hilt` with no arguments and no attached terminal exits with code `2` instead of
 hanging. Commands for later phases are not registered until they work.
 
+Managed SDKs are installed at `<data>/hilt/dotnet/<version>`. The install
+manifest and lock live beside that directory at
+`<data>/hilt/installs.json` and `<data>/hilt/installs.lock`. Removal requires
+both a managed path and manifest ownership. An SDK copied into the managed root
+by hand is reported but cannot be removed by Hilt.
+
+`hilt sdk outdated` checks the newest stable SDK in the same `major.minor`
+release channel as each managed installation. It reports results only; it does
+not download or update anything.
+
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success, or `doctor` found no errors. |
-| `1` | Operation failed, or `doctor` found errors. |
+| `0` | Success, already installed, stale entry reconciled, up to date, or `doctor` found no errors. |
+| `1` | Operation failed, including a refused removal or unavailable metadata, or `doctor` found errors. |
 | `2` | Usage error, unknown command, or missing TTY for the TUI. |
 | `130` | Interrupted or cancelled. |
 
@@ -76,9 +113,11 @@ Configuration lives under XDG directories, with a `hilt` suffix:
 - `$XDG_CACHE_HOME/hilt` (default `~/.cache/hilt`)
 - `$XDG_DATA_HOME/hilt` (default `~/.local/share/hilt`)
 
-The file is created only when a save is requested. Malformed files are moved to
-`config.json.corrupt-<timestamp>` and defaults are loaded. Unknown JSON fields
-are preserved on save. See [docs/safety.md](docs/safety.md).
+The configuration file is created only when a save is requested. Malformed
+files are moved to `config.json.corrupt-<timestamp>` and defaults are loaded.
+Unknown JSON fields are preserved on save. The data directory also holds the
+managed toolchains, install manifest, and install lock. See
+[docs/safety.md](docs/safety.md).
 
 ## Verification
 
@@ -87,12 +126,15 @@ are preserved on save. See [docs/safety.md](docs/safety.md).
 ```
 
 The script checks formatting, runs `go vet`, the test suite, the race-enabled
-test suite, and builds the binary. Unit tests require neither network access nor
-administrator privileges. A real-SDK integration test is opt-in:
+test suite, and builds the binary. Ordinary tests require neither network access
+nor administrator privileges. Install, removal, and update checks use local
+HTTP metadata and archive fixtures. A real-SDK integration test is opt-in:
 
 ```bash
 HILT_TEST_REAL_DOTNET=1 go test ./internal/dotnet -run TestRealDotnetInventory -v
 ```
+
+Real Microsoft downloads are not exercised by the regular suite.
 
 ## Documentation
 
