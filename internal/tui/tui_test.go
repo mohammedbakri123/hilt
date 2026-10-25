@@ -238,7 +238,7 @@ func TestNoDotnetIsNotFatal(t *testing.T) {
 	backend.selectionErr = &dotnet.MissingSDKError{}
 	model := loadedModel(t, backend, 120, 36)
 	view := model.View().Content
-	if !strings.Contains(view, "not detected") || !strings.Contains(view, "Phase 2") {
+	if !strings.Contains(view, "not detected") || !strings.Contains(view, "hilt sdk install") {
 		t.Errorf("missing graceful no-.NET state: %q", view)
 	}
 }

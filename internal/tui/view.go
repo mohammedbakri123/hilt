@@ -279,7 +279,7 @@ func (m Model) dashboardLines(width int) []string {
 
 	if !inventory.HasUsableHost() && len(inventory.SDKs) == 0 {
 		lines = append(lines, "", styleWarning.Render(
-			"No .NET SDK detected. Hilt remains fully usable; managed SDK installation arrives in Phase 2."))
+			"No .NET SDK detected. Hilt remains fully usable; install a managed SDK with hilt sdk install."))
 	}
 
 	warnings := m.warnings()
@@ -344,7 +344,7 @@ func (m Model) sdkLines(width int) []string {
 
 	lines = append(lines, "", styleLabel.Render("SDKS"))
 	if len(inventory.SDKs) == 0 {
-		lines = append(lines, "  none detected. SDK installation is planned for Phase 2.")
+		lines = append(lines, "  none detected. Install one with hilt sdk install.")
 	}
 	for _, sdk := range inventory.SDKs {
 		state := ""
@@ -442,7 +442,7 @@ func (m Model) settingsLines(width int) []string {
 		kv("Vim keys", fmt.Sprintf("%t", config.UI.VimKeys)),
 		kv("Scan exclusions", strings.Join(config.ScanExclusions, ", ")),
 		"",
-		styleMuted.Render("Settings editing is read-only in Phase 1. Edit the configuration file directly."),
+		styleMuted.Render("Settings editing is read-only. Edit the configuration file directly."),
 	)
 	if len(m.backend.ConfigWarnings()) > 0 {
 		lines = append(lines, "", styleLabel.Render("CONFIGURATION WARNINGS"))
@@ -473,7 +473,7 @@ func (m Model) warnings() []string {
 func placeholderLines(title string, phase int, description string, width int) []string {
 	lines := sectionHeader(title, width)
 	lines = append(lines,
-		styleWarning.Render("Not implemented in Phase 1."),
+		styleWarning.Render("Not implemented."),
 		"",
 		description,
 		"",
