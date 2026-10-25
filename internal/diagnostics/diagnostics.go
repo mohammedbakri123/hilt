@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -63,6 +64,7 @@ type Deps struct {
 	LookPath       func(string) (string, error)
 	Stat           func(string) (os.FileInfo, error)
 	Inventory      func(context.Context) (dotnet.Inventory, error)
+	Resolve        func(context.Context, dotnet.Inventory) (dotnet.Selection, error)
 	Cwd            string
 	PackageManager *platform.PackageManager
 }
@@ -96,8 +98,11 @@ func Run(ctx context.Context, deps Deps) Report {
 	add(dotnetPathFinding(deps))
 
 	inventory, inventoryErr := loadInventory(ctx, deps)
+	selection, selectionErr := loadSelection(ctx, deps, inventory, inventoryErr)
 	add(inventoryFinding(deps, inventory, inventoryErr))
-	add(globalJSONFinding(deps, inventory, inventoryErr))
+	add(toolchainFinding(deps, inventory, inventoryErr, selection, selectionErr))
+	add(globalJSONFinding(deps, inventory, inventoryErr, selection, selectionErr))
+	add(crossRootSDKFinding(deps, inventory, inventoryErr))
 	add(packageManagerFinding(deps))
 	add(gitFinding(deps))
 	add(managedRootFinding(deps))
@@ -175,6 +180,13 @@ func loadInventory(ctx context.Context, deps Deps) (dotnet.Inventory, error) {
 	return deps.Inventory(ctx)
 }
 
+func loadSelection(ctx context.Context, deps Deps, inventory dotnet.Inventory, inventoryErr error) (dotnet.Selection, error) {
+	if inventoryErr != nil || deps.Resolve == nil {
+		return dotnet.Selection{}, nil
+	}
+	return deps.Resolve(ctx, inventory)
+}
+
 func inventoryFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error) Finding {
 	if inventoryErr != nil {
 		return Finding{
@@ -194,7 +206,7 @@ func inventoryFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error)
 
 	details := []string{}
 	for _, host := range inventory.Hosts {
-		line := fmt.Sprintf("%s (%s, managed=%t)", host.Root, host.Source, host.Managed)
+		line := fmt.Sprintf("%s (%s, provenance=%s, owned=%t)", host.Root, host.Source, host.EffectiveProvenance(), host.Owned)
 		if host.Architecture != "" {
 			line += fmt.Sprintf(", arch=%s", host.Architecture)
 		}
@@ -238,7 +250,64 @@ func inventoryFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error)
 	}
 }
 
-func globalJSONFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error) Finding {
+func toolchainFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error, selection dotnet.Selection, selectionErr error) Finding {
+	if inventoryErr != nil {
+		return Finding{
+			ID:       "dotnet-toolchain",
+			Title:    "Selected toolchain",
+			Severity: SeverityInfo,
+			Summary:  "Selection skipped because inventory failed",
+		}
+	}
+	if selectionErr != nil {
+		return Finding{
+			ID:       "dotnet-toolchain",
+			Title:    "Selected toolchain",
+			Severity: SeverityWarning,
+			Summary:  "No usable .NET toolchain selected",
+			Detail:   selectionErr.Error(),
+		}
+	}
+	if selection.Root == "" {
+		return Finding{
+			ID:       "dotnet-toolchain",
+			Title:    "Selected toolchain",
+			Severity: SeverityWarning,
+			Summary:  "No .NET SDK is available for the current workspace",
+		}
+	}
+	detail := fmt.Sprintf("root: %s\ndotnet: %s\nsource: %s\nownership: %s",
+		selection.Root, selection.DotnetPath, valueOr(string(selection.Source), "unknown"), selection.EffectiveProvenance())
+	if selection.GlobalJSONPath != "" {
+		detail += fmt.Sprintf("\nglobal.json: %s (requested %s, reported %s)", selection.GlobalJSONPath, selection.RequestedVersion, selection.SDKVersion)
+	}
+	if selection.Rationale != "" {
+		detail += "\nreason: " + selection.Rationale
+	}
+	if len(selection.Attempts) > 1 {
+		lines := make([]string, 0, len(selection.Attempts))
+		for _, attempt := range selection.Attempts {
+			line := attempt.Root
+			switch {
+			case attempt.Error != "":
+				line += ": " + attempt.Error
+			case attempt.Version != "":
+				line += ": " + attempt.Version
+			}
+			lines = append(lines, line)
+		}
+		detail += "\nattempts:\n  " + strings.Join(lines, "\n  ")
+	}
+	return Finding{
+		ID:       "dotnet-toolchain",
+		Title:    "Selected toolchain",
+		Severity: SeverityOK,
+		Summary:  fmt.Sprintf("SDK %s (%s) at %s", selection.SDKVersion, selection.EffectiveProvenance(), selection.Root),
+		Detail:   detail,
+	}
+}
+
+func globalJSONFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error, selection dotnet.Selection, selectionErr error) Finding {
 	globalJSON, err := dotnet.FindGlobalJSON(deps.Cwd, deps.Stat)
 	if err != nil {
 		return Finding{
@@ -288,6 +357,38 @@ func globalJSONFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error
 		}
 	}
 
+	if deps.Resolve != nil {
+		if selectionErr == nil && selection.RequestedVersion != "" {
+			return Finding{
+				ID:       "global-json",
+				Title:    "global.json",
+				Severity: SeverityOK,
+				Summary:  fmt.Sprintf("global.json requires %s; selected SDK %s (%s)", globalJSON.Version, selection.SDKVersion, selection.EffectiveProvenance()),
+				Detail:   detail + "\nselected root: " + selection.Root + "\nreported version: " + selection.SDKVersion,
+			}
+		}
+		var missing *dotnet.MissingSDKError
+		if errors.As(selectionErr, &missing) {
+			return Finding{
+				ID:          "global-json",
+				Title:       "global.json",
+				Severity:    SeverityError,
+				Summary:     "Required SDK " + globalJSON.Version + " is not available",
+				Detail:      detail + "\n" + selectionErr.Error(),
+				Remediation: fmt.Sprintf("Install .NET SDK %s in a managed or system root. Managed installation is planned for Phase 2.", globalJSON.Version),
+			}
+		}
+		if selectionErr != nil {
+			return Finding{
+				ID:       "global-json",
+				Title:    "global.json",
+				Severity: SeverityWarning,
+				Summary:  "global.json requires SDK " + globalJSON.Version,
+				Detail:   detail + "\nselection failed: " + selectionErr.Error(),
+			}
+		}
+	}
+
 	if inventory.FindSDK(globalJSON.Version) != nil {
 		return Finding{
 			ID:       "global-json",
@@ -310,6 +411,52 @@ func globalJSONFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error
 		Detail:      detail,
 		Remediation: remediation,
 	}
+}
+
+func crossRootSDKFinding(deps Deps, inventory dotnet.Inventory, inventoryErr error) Finding {
+	if inventoryErr != nil || len(inventory.SDKs) == 0 {
+		return Finding{
+			ID:       "cross-root-sdks",
+			Title:    "SDKs across roots",
+			Severity: SeverityInfo,
+			Summary:  "Cross-root SDK comparison unavailable",
+		}
+	}
+	rootsByVersion := map[string][]string{}
+	for _, sdk := range inventory.SDKs {
+		rootsByVersion[sdk.Version] = appendUnique(rootsByVersion[sdk.Version], sdk.Root)
+	}
+	duplicates := make([]string, 0)
+	for version, roots := range rootsByVersion {
+		if len(roots) > 1 {
+			duplicates = append(duplicates, fmt.Sprintf("%s: %s", version, strings.Join(roots, ", ")))
+		}
+	}
+	if len(duplicates) == 0 {
+		return Finding{
+			ID:       "cross-root-sdks",
+			Title:    "SDKs across roots",
+			Severity: SeverityOK,
+			Summary:  "No SDK version is duplicated across installation roots",
+		}
+	}
+	sort.Strings(duplicates)
+	return Finding{
+		ID:       "cross-root-sdks",
+		Title:    "SDKs across roots",
+		Severity: SeverityInfo,
+		Summary:  fmt.Sprintf("%d SDK version(s) are available in more than one root", len(duplicates)),
+		Detail:   strings.Join(duplicates, "\n"),
+	}
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func packageManagerFinding(deps Deps) Finding {

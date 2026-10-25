@@ -91,19 +91,24 @@ func badge(severity diagnostics.Severity, color bool) string {
 	return "\x1b[" + code + "m" + label + "\x1b[0m"
 }
 
-func printSDKs(writer io.Writer, inventory dotnet.Inventory) {
+func printSDKs(writer io.Writer, inventory dotnet.Inventory, selection *dotnet.Selection) {
 	if len(inventory.SDKs) == 0 {
 		fmt.Fprintln(writer, "No .NET SDKs detected.")
 		return
 	}
 	table := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "VERSION\tSOURCE\tUSABLE\tPATH")
+	fmt.Fprintln(table, "VERSION\tSOURCE\tOWNERSHIP\tSELECTED\tUSABLE\tPATH")
 	for _, sdk := range inventory.SDKs {
 		usable := "yes"
 		if !sdk.Usable {
 			usable = "no"
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", sdk.Version, sdk.EffectiveProvenance(), usable, sdk.Path)
+		selected := ""
+		if selection != nil && sdk.Root == selection.Root && sdk.Version == selection.SDKVersion {
+			selected = "*"
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			sdk.Version, sourceName(inventory, sdk.Root, sdk.Source), sdk.EffectiveProvenance(), selected, usable, sdk.Path)
 	}
 	_ = table.Flush()
 }
@@ -114,10 +119,56 @@ func printRuntimes(writer io.Writer, inventory dotnet.Inventory) {
 		return
 	}
 	table := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "FRAMEWORK\tVERSION\tSOURCE\tPATH")
+	fmt.Fprintln(table, "FRAMEWORK\tVERSION\tSOURCE\tOWNERSHIP\tPATH")
 	for _, runtime := range inventory.Runtimes {
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
-			runtime.Framework, runtime.Version, runtime.EffectiveProvenance(), runtime.Path)
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n",
+			runtime.Framework, runtime.Version, sourceName(inventory, runtime.Root, runtime.Source),
+			runtime.EffectiveProvenance(), runtime.Path)
 	}
 	_ = table.Flush()
+}
+
+func printSelection(writer io.Writer, selection dotnet.Selection) {
+	fmt.Fprintln(writer, "Selected .NET toolchain")
+	fmt.Fprintf(writer, "  SDK         %s\n", selection.SDKVersion)
+	fmt.Fprintf(writer, "  Root        %s\n", selection.Root)
+	fmt.Fprintf(writer, "  dotnet      %s\n", selection.DotnetPath)
+	fmt.Fprintf(writer, "  Source      %s\n", valueOr(string(selection.Source), "unknown"))
+	fmt.Fprintf(writer, "  Ownership   %s\n", selection.EffectiveProvenance())
+	if selection.GlobalJSONPath != "" {
+		fmt.Fprintf(writer, "  global.json %s\n", selection.GlobalJSONPath)
+	}
+	fmt.Fprintf(writer, "  Reason      %s\n", selection.Rationale)
+	if len(selection.Attempts) > 0 {
+		fmt.Fprintln(writer, "  Attempts")
+		for _, attempt := range selection.Attempts {
+			line := fmt.Sprintf("    %s (%s)", attempt.Root, attempt.Source)
+			switch {
+			case attempt.Error != "":
+				line += ": " + attempt.Error
+			case attempt.Version != "":
+				line += ": " + attempt.Version
+			}
+			fmt.Fprintln(writer, line)
+		}
+	}
+}
+
+func sourceName(inventory dotnet.Inventory, root string, source dotnet.Source) string {
+	if source != "" {
+		return string(source)
+	}
+	for _, host := range inventory.Hosts {
+		if host.Root == root && host.Source != "" {
+			return string(host.Source)
+		}
+	}
+	return "unknown"
+}
+
+func valueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }

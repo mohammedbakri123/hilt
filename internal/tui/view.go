@@ -108,6 +108,9 @@ func (m Model) dotnetSummary() string {
 	if m.inventory == nil {
 		return ".NET unknown"
 	}
+	if m.selection != nil && m.selection.SDKVersion != "" {
+		return ".NET SDK " + m.selection.SDKVersion
+	}
 	if len(m.inventory.SDKs) == 0 {
 		return ".NET not detected"
 	}
@@ -265,6 +268,14 @@ func (m Model) dashboardLines(width int) []string {
 		kv("Resolved dotnet", valueOr(inventory.ResolvedDotnet(), "not found")),
 		kv("Managed root", m.backend.Config().ManagedRoot),
 	)
+	if m.selection != nil {
+		lines = append(lines,
+			kv("Selected SDK", fmt.Sprintf("%s (%s)", m.selection.SDKVersion, m.selection.EffectiveProvenance())),
+			kv("Selected root", m.selection.Root),
+		)
+	} else if m.selectionErr != nil {
+		lines = append(lines, kv("Selected SDK", styleWarning.Render("unavailable")))
+	}
 
 	if !inventory.HasUsableHost() && len(inventory.SDKs) == 0 {
 		lines = append(lines, "", styleWarning.Render(
@@ -297,6 +308,25 @@ func (m Model) sdkLines(width int) []string {
 	lines = append(lines, fmt.Sprintf("%d host(s) · %d SDK(s) · %d runtime(s)",
 		len(inventory.Hosts), len(inventory.SDKs), len(inventory.Runtimes)))
 
+	lines = append(lines, "", styleLabel.Render("SELECTED TOOLCHAIN"))
+	switch {
+	case m.selection != nil:
+		lines = append(lines,
+			fmt.Sprintf("  SDK %s (%s)", m.selection.SDKVersion, m.selection.EffectiveProvenance()),
+			"  root "+m.selection.Root,
+		)
+		if m.selection.GlobalJSONPath != "" {
+			lines = append(lines, "  global.json "+m.selection.GlobalJSONPath)
+		}
+		if m.selection.Rationale != "" {
+			lines = append(lines, "  "+styleMuted.Render(m.selection.Rationale))
+		}
+	case m.selectionErr != nil:
+		lines = append(lines, "  "+styleWarning.Render(m.selectionErr.Error()))
+	default:
+		lines = append(lines, "  not resolved")
+	}
+
 	lines = append(lines, "", styleLabel.Render("HOSTS"))
 	if len(inventory.Hosts) == 0 {
 		lines = append(lines, "  none detected")
@@ -321,7 +351,11 @@ func (m Model) sdkLines(width int) []string {
 		if !sdk.Usable {
 			state = "  " + styleWarning.Render("unusable")
 		}
-		lines = append(lines, fmt.Sprintf("  %-12s %s  [%s]%s", sdk.Version, sdk.Path, sdk.EffectiveProvenance(), state))
+		marker := " "
+		if m.selection != nil && sdk.Root == m.selection.Root && sdk.Version == m.selection.SDKVersion {
+			marker = "*"
+		}
+		lines = append(lines, fmt.Sprintf("  %s %-12s %s  [%s]%s", marker, sdk.Version, sdk.Path, sdk.EffectiveProvenance(), state))
 	}
 
 	lines = append(lines, "", styleLabel.Render("RUNTIMES"))
@@ -429,6 +463,9 @@ func (m Model) warnings() []string {
 	}
 	if m.inventory != nil {
 		warnings = append(warnings, m.inventory.Warnings...)
+	}
+	if m.selectionErr != nil {
+		warnings = append(warnings, m.selectionErr.Error())
 	}
 	return dedupeStrings(warnings)
 }

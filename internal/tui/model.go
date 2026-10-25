@@ -22,6 +22,7 @@ type Backend interface {
 	ConfigWarnings() []string
 	PackageManager() *platform.PackageManager
 	Inventory(ctx context.Context) (dotnet.Inventory, error)
+	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
 	Diagnose(ctx context.Context) diagnostics.Report
 	Tool(name string) (string, bool)
 }
@@ -64,8 +65,10 @@ const (
 )
 
 type inventoryMsg struct {
-	inventory dotnet.Inventory
-	err       error
+	inventory    dotnet.Inventory
+	selection    *dotnet.Selection
+	selectionErr error
+	err          error
 }
 
 type doctorMsg struct {
@@ -85,6 +88,8 @@ type Model struct {
 	loadingInventory bool
 	inventory        *dotnet.Inventory
 	inventoryErr     error
+	selection        *dotnet.Selection
+	selectionErr     error
 
 	loadingDoctor bool
 	report        *diagnostics.Report
@@ -128,7 +133,15 @@ func (m Model) inventoryCmd() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		inventory, err := backend.Inventory(ctx)
-		return inventoryMsg{inventory: inventory, err: err}
+		if err != nil {
+			return inventoryMsg{inventory: inventory, err: err}
+		}
+		selection, selectionErr := backend.Resolve(ctx, inventory)
+		var selected *dotnet.Selection
+		if selectionErr == nil {
+			selected = &selection
+		}
+		return inventoryMsg{inventory: inventory, selection: selected, selectionErr: selectionErr}
 	}
 }
 
@@ -158,10 +171,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.loadingInventory = false
 		if message.err != nil {
 			m.inventoryErr = message.err
+			m.selection = nil
+			m.selectionErr = nil
 		} else {
 			m.inventoryErr = nil
 			inventory := message.inventory
 			m.inventory = &inventory
+			m.selection = message.selection
+			m.selectionErr = message.selectionErr
 		}
 		m.clampScroll()
 		return m, nil

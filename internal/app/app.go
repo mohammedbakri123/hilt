@@ -115,6 +115,17 @@ func (a *App) Inventory(ctx context.Context) (dotnet.Inventory, error) {
 	return dotnet.Discover(ctx, a.locator, a.prober, os.Stat), nil
 }
 
+// Resolve selects the toolchain Hilt will use for the current workspace.
+func (a *App) Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error) {
+	return dotnet.Resolver{
+		Inventory: inventory,
+		Dir:       a.cwd,
+		Runner:    a.runner,
+		Stat:      os.Stat,
+		BaseEnv:   os.Environ(),
+	}.Resolve(ctx)
+}
+
 // Diagnose runs the full doctor engine.
 func (a *App) Diagnose(ctx context.Context) diagnostics.Report {
 	return diagnostics.Run(ctx, diagnostics.Deps{
@@ -126,6 +137,7 @@ func (a *App) Diagnose(ctx context.Context) diagnostics.Report {
 		LookPath:       a.lookPath,
 		Stat:           os.Stat,
 		Inventory:      a.Inventory,
+		Resolve:        a.Resolve,
 		Cwd:            a.cwd,
 		PackageManager: a.packageManager,
 	})

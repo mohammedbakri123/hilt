@@ -17,6 +17,8 @@ import (
 type fakeBackend struct {
 	inventory    dotnet.Inventory
 	inventoryErr error
+	selection    dotnet.Selection
+	selectionErr error
 	report       diagnostics.Report
 }
 
@@ -29,6 +31,9 @@ func (f fakeBackend) ConfigWarnings() []string {
 func (f fakeBackend) PackageManager() *platform.PackageManager { return nil }
 func (f fakeBackend) Inventory(context.Context) (dotnet.Inventory, error) {
 	return f.inventory, f.inventoryErr
+}
+func (f fakeBackend) Resolve(context.Context, dotnet.Inventory) (dotnet.Selection, error) {
+	return f.selection, f.selectionErr
 }
 func (f fakeBackend) Diagnose(context.Context) diagnostics.Report { return f.report }
 func (f fakeBackend) Tool(string) (string, bool)                  { return "", false }
@@ -43,16 +48,26 @@ func populatedBackend() fakeBackend {
 				Root:       "/usr/share/dotnet",
 				DotnetPath: "/usr/share/dotnet/dotnet",
 				Source:     dotnet.SourcePath,
+				Provenance: dotnet.ProvenanceSystem,
+				Usable:     true,
 			}},
 			SDKs: []dotnet.SDK{
-				{Version: "10.0.112", Path: "/usr/share/dotnet/sdk/10.0.112", Usable: true},
-				{Version: "9.0.300", Path: "/home/u/.local/share/hilt/dotnet/sdk/9.0.300", Managed: true, Usable: true},
+				{Version: "10.0.112", Path: "/usr/share/dotnet/sdk/10.0.112", Root: "/usr/share/dotnet", Source: dotnet.SourcePath, Provenance: dotnet.ProvenanceSystem, Usable: true},
+				{Version: "9.0.300", Path: "/home/u/.local/share/hilt/dotnet/sdk/9.0.300", Root: "/home/u/.local/share/hilt/dotnet", Source: dotnet.SourceManaged, Provenance: dotnet.ProvenanceManaged, Managed: true, Usable: true},
 			},
 			Runtimes: []dotnet.Runtime{
-				{Framework: "Microsoft.NETCore.App", Version: "10.0.12", Path: "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.12"},
-				{Framework: "Microsoft.AspNetCore.App", Version: "10.0.12", Path: "/usr/share/dotnet/shared/Microsoft.AspNetCore.App/10.0.12", Managed: true},
+				{Framework: "Microsoft.NETCore.App", Version: "10.0.12", Path: "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.12", Root: "/usr/share/dotnet", Source: dotnet.SourcePath, Provenance: dotnet.ProvenanceSystem},
+				{Framework: "Microsoft.AspNetCore.App", Version: "10.0.12", Path: "/usr/share/dotnet/shared/Microsoft.AspNetCore.App/10.0.12", Root: "/home/u/.local/share/hilt/dotnet", Source: dotnet.SourceManaged, Provenance: dotnet.ProvenanceManaged, Managed: true},
 			},
 			Warnings: []string{"No .NET SDKs were detected."},
+		},
+		selection: dotnet.Selection{
+			Root:       "/usr/share/dotnet",
+			DotnetPath: "/usr/share/dotnet/dotnet",
+			SDKVersion: "10.0.112",
+			Source:     dotnet.SourcePath,
+			Provenance: dotnet.ProvenanceSystem,
+			Rationale:  "system SDK 10.0.112 selected as the newest system installation; no managed SDK is available",
 		},
 		report: diagnostics.Report{
 			HiltVersion: "test",
@@ -347,5 +362,102 @@ func TestCancellation(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "cancelled") {
 		t.Errorf("missing cancellation message: %q", errOut.String())
+	}
+}
+
+func TestSDKListMarksSelectedToolchain(t *testing.T) {
+	result := run(t, []string{"sdk", "list"}, populatedBackend(), false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"VERSION", "SOURCE", "OWNERSHIP", "SELECTED", "USABLE", "10.0.112", "9.0.300", "system", "managed", "*"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestSDKWhichHumanAndJSON(t *testing.T) {
+	human := run(t, []string{"sdk", "which"}, populatedBackend(), false, nil)
+	if human.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", human.code, human.stderr)
+	}
+	for _, want := range []string{"Selected .NET toolchain", "10.0.112", "/usr/share/dotnet", "system", "newest system installation"} {
+		if !strings.Contains(human.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, human.stdout)
+		}
+	}
+
+	machine := run(t, []string{"sdk", "which", "--json"}, populatedBackend(), false, nil)
+	if machine.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", machine.code, machine.stderr)
+	}
+	if machine.stderr != "" {
+		t.Errorf("JSON mode wrote to stderr: %q", machine.stderr)
+	}
+	var payload struct {
+		SchemaVersion int    `json:"schemaVersion"`
+		Root          string `json:"root"`
+		DotnetPath    string `json:"dotnetPath"`
+		SDKVersion    string `json:"sdkVersion"`
+		Source        string `json:"source"`
+		Provenance    string `json:"provenance"`
+	}
+	if err := json.Unmarshal([]byte(machine.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, machine.stdout)
+	}
+	if payload.SchemaVersion != 1 || payload.Root != "/usr/share/dotnet" || payload.SDKVersion != "10.0.112" {
+		t.Errorf("unexpected payload: %+v", payload)
+	}
+	if payload.Provenance != "system" || payload.Source != "path" {
+		t.Errorf("unexpected provenance/source: %+v", payload)
+	}
+}
+
+func TestSDKListSelectionFailureIsAWarning(t *testing.T) {
+	backend := populatedBackend()
+	backend.selectionErr = &dotnet.MissingSDKError{
+		RequestedVersion: "8.0.100",
+		GlobalJSONPath:   "/workspace/global.json",
+		Attempts: []dotnet.Attempt{
+			{Root: "/usr/share/dotnet", Source: dotnet.SourcePath, Provenance: dotnet.ProvenanceSystem, Error: "not found"},
+		},
+	}
+	human := run(t, []string{"sdk", "list"}, backend, false, nil)
+	if human.code != 0 {
+		t.Fatalf("exit = %d, want 0", human.code)
+	}
+	if !strings.Contains(human.stdout, "10.0.112") {
+		t.Errorf("SDK list should still render: %q", human.stdout)
+	}
+	if !strings.Contains(human.stderr, "8.0.100") {
+		t.Errorf("selection warning missing: %q", human.stderr)
+	}
+
+	machine := run(t, []string{"sdk", "list", "--json"}, backend, false, nil)
+	if machine.stderr != "" {
+		t.Errorf("JSON mode wrote to stderr: %q", machine.stderr)
+	}
+	var payload struct {
+		Selection      *dotnet.Selection `json:"selection"`
+		SelectionError string            `json:"selectionError"`
+	}
+	if err := json.Unmarshal([]byte(machine.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, machine.stdout)
+	}
+	if payload.Selection != nil || !strings.Contains(payload.SelectionError, "8.0.100") {
+		t.Errorf("unexpected selection payload: %+v", payload)
+	}
+}
+
+func TestSDKWhichSelectionFailureExitsOne(t *testing.T) {
+	backend := populatedBackend()
+	backend.selectionErr = &dotnet.MissingSDKError{RequestedVersion: "8.0.100"}
+	result := run(t, []string{"sdk", "which"}, backend, false, nil)
+	if result.code != 1 {
+		t.Fatalf("exit = %d, want 1", result.code)
+	}
+	if !strings.Contains(result.stderr, "8.0.100") {
+		t.Errorf("missing failure: %q", result.stderr)
 	}
 }

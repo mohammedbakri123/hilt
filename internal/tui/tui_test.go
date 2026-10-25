@@ -18,6 +18,8 @@ import (
 type fakeBackend struct {
 	inventory      dotnet.Inventory
 	inventoryErr   error
+	selection      dotnet.Selection
+	selectionErr   error
 	report         diagnostics.Report
 	config         config.Config
 	paths          platform.Paths
@@ -30,6 +32,9 @@ func (f fakeBackend) Paths() platform.Paths    { return f.paths }
 func (f fakeBackend) ConfigWarnings() []string { return f.configWarnings }
 func (f fakeBackend) Inventory(context.Context) (dotnet.Inventory, error) {
 	return f.inventory, f.inventoryErr
+}
+func (f fakeBackend) Resolve(context.Context, dotnet.Inventory) (dotnet.Selection, error) {
+	return f.selection, f.selectionErr
 }
 func (f fakeBackend) Diagnose(context.Context) diagnostics.Report { return f.report }
 func (f fakeBackend) Platform() platform.Info {
@@ -52,15 +57,25 @@ func newFakeBackend() fakeBackend {
 				Root:       "/usr/share/dotnet",
 				DotnetPath: "/usr/share/dotnet/dotnet",
 				Source:     dotnet.SourcePath,
+				Provenance: dotnet.ProvenanceSystem,
+				Usable:     true,
 			}},
 			SDKs: []dotnet.SDK{
-				{Version: "10.0.112", Path: "/usr/share/dotnet/sdk/10.0.112", Root: "/usr/share/dotnet", Usable: true},
-				{Version: "9.0.300", Path: "/home/u/.local/share/hilt/dotnet/sdk/9.0.300", Root: "/home/u/.local/share/hilt/dotnet", Managed: true, Usable: true},
+				{Version: "10.0.112", Path: "/usr/share/dotnet/sdk/10.0.112", Root: "/usr/share/dotnet", Source: dotnet.SourcePath, Provenance: dotnet.ProvenanceSystem, Usable: true},
+				{Version: "9.0.300", Path: "/home/u/.local/share/hilt/dotnet/sdk/9.0.300", Root: "/home/u/.local/share/hilt/dotnet", Source: dotnet.SourceManaged, Provenance: dotnet.ProvenanceManaged, Managed: true, Usable: true},
 			},
 			Runtimes: []dotnet.Runtime{
-				{Framework: "Microsoft.NETCore.App", Version: "10.0.12", Path: "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.12"},
-				{Framework: "Microsoft.AspNetCore.App", Version: "10.0.12", Path: "/usr/share/dotnet/shared/Microsoft.AspNetCore.App/10.0.12"},
+				{Framework: "Microsoft.NETCore.App", Version: "10.0.12", Path: "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.12", Root: "/usr/share/dotnet", Provenance: dotnet.ProvenanceSystem},
+				{Framework: "Microsoft.AspNetCore.App", Version: "10.0.12", Path: "/usr/share/dotnet/shared/Microsoft.AspNetCore.App/10.0.12", Root: "/usr/share/dotnet", Provenance: dotnet.ProvenanceSystem},
 			},
+		},
+		selection: dotnet.Selection{
+			Root:       "/usr/share/dotnet",
+			DotnetPath: "/usr/share/dotnet/dotnet",
+			SDKVersion: "10.0.112",
+			Source:     dotnet.SourcePath,
+			Provenance: dotnet.ProvenanceSystem,
+			Rationale:  "system SDK 10.0.112 selected as the newest system installation; no managed SDK is available",
 		},
 		report: diagnostics.Report{
 			Findings: []diagnostics.Finding{
@@ -89,7 +104,12 @@ func loadedModel(t *testing.T, backend fakeBackend, width, height int) Model {
 	model := Now(backend)
 	model = modelWithSize(t, model, width, height)
 	model = press(t, model, key('r', "r"))
-	model = apply(t, model, inventoryMsg{inventory: backend.inventory})
+	message := inventoryMsg{inventory: backend.inventory, selectionErr: backend.selectionErr}
+	if backend.selection.Root != "" {
+		selection := backend.selection
+		message.selection = &selection
+	}
+	model = apply(t, model, message)
 	model = apply(t, model, doctorMsg{report: backend.report})
 	return model
 }
@@ -144,7 +164,7 @@ func TestViewFitsLayouts(t *testing.T) {
 func TestDashboardShowsInventory(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
 	view := model.View().Content
-	for _, want := range []string{"Dashboard", "10.0.112", "9.0.300", "CachyOS", "pacman", "/usr/share/dotnet/dotnet"} {
+	for _, want := range []string{"Dashboard", "10.0.112", "9.0.300", "CachyOS", "pacman", "/usr/share/dotnet/dotnet", "Selected SDK", "system"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
@@ -160,6 +180,9 @@ func TestNavigation(t *testing.T) {
 	view := model.View().Content
 	if !strings.Contains(view, "SDKs & Runtimes") || !strings.Contains(view, "HOSTS") || !strings.Contains(view, "RUNTIMES") {
 		t.Errorf("SDK screen missing content: %q", view)
+	}
+	if !strings.Contains(view, "SELECTED TOOLCHAIN") || !strings.Contains(view, "* 10.0.112") {
+		t.Errorf("SDK screen missing selection: %q", view)
 	}
 
 	model = press(t, model, key('7', "7"))
@@ -211,6 +234,8 @@ func TestRefreshAndSpinner(t *testing.T) {
 func TestNoDotnetIsNotFatal(t *testing.T) {
 	backend := newFakeBackend()
 	backend.inventory = dotnet.Inventory{Warnings: []string{"No .NET installation roots found; install the .NET SDK to use build and project features."}}
+	backend.selection = dotnet.Selection{}
+	backend.selectionErr = &dotnet.MissingSDKError{}
 	model := loadedModel(t, backend, 120, 36)
 	view := model.View().Content
 	if !strings.Contains(view, "not detected") || !strings.Contains(view, "Phase 2") {

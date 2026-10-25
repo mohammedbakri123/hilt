@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mohammedbakri123/hilt/internal/config"
@@ -177,5 +178,122 @@ func TestSortedFindings(t *testing.T) {
 	sorted := report.SortedFindings()
 	if sorted[0].ID != "a" || sorted[1].ID != "c" || sorted[2].ID != "b" {
 		t.Errorf("sorted = %+v", sorted)
+	}
+}
+
+func TestRunShowsSelectedToolchain(t *testing.T) {
+	deps := baseDeps(t)
+	deps.Resolve = func(context.Context, dotnet.Inventory) (dotnet.Selection, error) {
+		return dotnet.Selection{
+			Root:       "/home/u/.local/share/hilt/dotnet",
+			DotnetPath: "/home/u/.local/share/hilt/dotnet/dotnet",
+			SDKVersion: "9.0.300",
+			Source:     dotnet.SourceManaged,
+			Provenance: dotnet.ProvenanceManaged,
+			Owned:      true,
+			Rationale:  "managed SDK 9.0.300 selected as the newest managed installation",
+		}, nil
+	}
+	report := Run(context.Background(), deps)
+	finding := report.FindingByID("dotnet-toolchain")
+	if finding == nil || finding.Severity != SeverityOK {
+		t.Fatalf("toolchain finding = %+v", finding)
+	}
+	for _, want := range []string{"9.0.300", "managed", "/home/u/.local/share/hilt/dotnet"} {
+		if !strings.Contains(finding.Summary+finding.Detail, want) {
+			t.Errorf("toolchain finding missing %q: %+v", want, finding)
+		}
+	}
+}
+
+func TestRunGlobalJSONUsesResolverRollForward(t *testing.T) {
+	deps := baseDeps(t)
+	cwd := t.TempDir()
+	content := `{"sdk":{"version":"8.0.100","rollForward":"latestFeature"}}`
+	if err := os.WriteFile(filepath.Join(cwd, "global.json"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps.Cwd = cwd
+	deps.Resolve = func(context.Context, dotnet.Inventory) (dotnet.Selection, error) {
+		return dotnet.Selection{
+			Root:             "/usr/share/dotnet",
+			DotnetPath:       "/usr/share/dotnet/dotnet",
+			SDKVersion:       "10.0.112",
+			Source:           dotnet.SourcePath,
+			Provenance:       dotnet.ProvenanceSystem,
+			GlobalJSONPath:   filepath.Join(cwd, "global.json"),
+			RequestedVersion: "8.0.100",
+			Verified:         true,
+		}, nil
+	}
+	report := Run(context.Background(), deps)
+	finding := report.FindingByID("global-json")
+	if finding == nil || finding.Severity != SeverityOK {
+		t.Fatalf("global-json finding = %+v", finding)
+	}
+	if !strings.Contains(finding.Summary, "10.0.112") {
+		t.Errorf("summary should report the actual selected SDK: %+v", finding)
+	}
+}
+
+func TestRunGlobalJSONResolverMissing(t *testing.T) {
+	deps := baseDeps(t)
+	cwd := t.TempDir()
+	content := `{"sdk":{"version":"8.0.100"}}`
+	if err := os.WriteFile(filepath.Join(cwd, "global.json"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps.Cwd = cwd
+	deps.Resolve = func(context.Context, dotnet.Inventory) (dotnet.Selection, error) {
+		return dotnet.Selection{}, &dotnet.MissingSDKError{
+			RequestedVersion: "8.0.100",
+			GlobalJSONPath:   filepath.Join(cwd, "global.json"),
+			Attempts: []dotnet.Attempt{{
+				Root: "/usr/share/dotnet", Source: dotnet.SourcePath,
+				Provenance: dotnet.ProvenanceSystem, Error: "not found",
+			}},
+		}
+	}
+	report := Run(context.Background(), deps)
+	globalJSON := report.FindingByID("global-json")
+	if globalJSON == nil || globalJSON.Severity != SeverityError {
+		t.Fatalf("global-json finding = %+v", globalJSON)
+	}
+	if !strings.Contains(globalJSON.Detail, "not found") {
+		t.Errorf("detail should include attempts: %+v", globalJSON)
+	}
+	toolchain := report.FindingByID("dotnet-toolchain")
+	if toolchain == nil || toolchain.Severity != SeverityWarning {
+		t.Errorf("toolchain finding = %+v", toolchain)
+	}
+	if report.ExitCode() != 1 {
+		t.Errorf("exit code = %d", report.ExitCode())
+	}
+}
+
+func TestRunCrossRootDuplicatesAreInfo(t *testing.T) {
+	deps := baseDeps(t)
+	deps.Inventory = func(context.Context) (dotnet.Inventory, error) {
+		return dotnet.Inventory{
+			Hosts: []dotnet.Host{
+				{Root: "/usr/share/dotnet", DotnetPath: "/usr/share/dotnet/dotnet", Source: dotnet.SourcePath},
+				{Root: "/home/u/.dotnet", DotnetPath: "/home/u/.dotnet/dotnet", Source: dotnet.SourcePath},
+			},
+			SDKs: []dotnet.SDK{
+				{Version: "10.0.112", Root: "/usr/share/dotnet", Source: dotnet.SourcePath},
+				{Version: "10.0.112", Root: "/home/u/.dotnet", Source: dotnet.SourcePath},
+			},
+		}, nil
+	}
+	report := Run(context.Background(), deps)
+	finding := report.FindingByID("cross-root-sdks")
+	if finding == nil || finding.Severity != SeverityInfo {
+		t.Fatalf("cross-root finding = %+v", finding)
+	}
+	if !strings.Contains(finding.Detail, "/usr/share/dotnet") || !strings.Contains(finding.Detail, "/home/u/.dotnet") {
+		t.Errorf("detail = %q", finding.Detail)
+	}
+	if report.ExitCode() != 0 {
+		t.Errorf("duplicates must not fail doctor: %d", report.ExitCode())
 	}
 }

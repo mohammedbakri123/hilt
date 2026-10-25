@@ -24,6 +24,7 @@ type Backend interface {
 	ConfigWarnings() []string
 	PackageManager() *platform.PackageManager
 	Inventory(ctx context.Context) (dotnet.Inventory, error)
+	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
 	Diagnose(ctx context.Context) diagnostics.Report
 	Tool(name string) (string, bool)
 }
@@ -255,6 +256,7 @@ func newSDKCommand(options Options) *cobra.Command {
 		},
 	}
 	command.AddCommand(newInventoryListCommand(options, inventorySDKs, "list", "List installed .NET SDKs"))
+	command.AddCommand(newSDKWhichCommand(options))
 	return command
 }
 
@@ -268,6 +270,48 @@ func newRuntimeCommand(options Options) *cobra.Command {
 		},
 	}
 	command.AddCommand(newInventoryListCommand(options, inventoryRuntimes, "list", "List installed .NET runtimes"))
+	return command
+}
+
+func newSDKWhichCommand(options Options) *cobra.Command {
+	var asJSON bool
+	command := &cobra.Command{
+		Use:     "which",
+		Aliases: []string{"current"},
+		Short:   "Show the selected .NET SDK toolchain",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.Context().Err(); err != nil {
+				return &exitError{code: 130, err: err}
+			}
+			inventory, err := options.Backend.Inventory(cmd.Context())
+			if err != nil {
+				if cmd.Context().Err() != nil {
+					return &exitError{code: 130, err: err}
+				}
+				return failure(err)
+			}
+			selection, err := options.Backend.Resolve(cmd.Context(), inventory)
+			if err != nil {
+				if cmd.Context().Err() != nil {
+					return &exitError{code: 130, err: err}
+				}
+				return failure(err)
+			}
+			if asJSON {
+				if err := writeJSON(options.Out, struct {
+					SchemaVersion int `json:"schemaVersion"`
+					dotnet.Selection
+				}{SchemaVersion: schemaVersion, Selection: selection}); err != nil {
+					return failure(err)
+				}
+				return nil
+			}
+			printSelection(options.Out, selection)
+			return nil
+		},
+	}
+	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
 	return command
 }
 
@@ -299,23 +343,50 @@ func newInventoryListCommand(options Options, kind inventoryKind, use, short str
 				return &exitError{code: 130, err: err}
 			}
 
+			var selection *dotnet.Selection
+			var selectionErr error
+			if kind == inventorySDKs {
+				resolved, err := options.Backend.Resolve(cmd.Context(), inventory)
+				if err != nil {
+					if cmd.Context().Err() != nil {
+						return &exitError{code: 130, err: err}
+					}
+					selectionErr = err
+				} else {
+					selection = &resolved
+				}
+			}
+
 			if asJSON {
 				normalizeInventory(&inventory)
-				if err := writeJSON(options.Out, struct {
+				payload := struct {
 					SchemaVersion int `json:"schemaVersion"`
 					dotnet.Inventory
-				}{SchemaVersion: schemaVersion, Inventory: inventory}); err != nil {
+					Selection      *dotnet.Selection `json:"selection,omitempty"`
+					SelectionError string            `json:"selectionError,omitempty"`
+				}{
+					SchemaVersion: schemaVersion,
+					Inventory:     inventory,
+					Selection:     selection,
+				}
+				if selectionErr != nil {
+					payload.SelectionError = selectionErr.Error()
+				}
+				if err := writeJSON(options.Out, payload); err != nil {
 					return failure(err)
 				}
 				return nil
 			}
 
 			if kind == inventorySDKs {
-				printSDKs(options.Out, inventory)
+				printSDKs(options.Out, inventory, selection)
 			} else {
 				printRuntimes(options.Out, inventory)
 			}
 			for _, warning := range inventory.Warnings {
+				fmt.Fprintln(options.Err, "warning:", warning)
+			}
+			if warning := selectionWarning(selectionErr); warning != "" {
 				fmt.Fprintln(options.Err, "warning:", warning)
 			}
 			return nil
@@ -323,4 +394,15 @@ func newInventoryListCommand(options Options, kind inventoryKind, use, short str
 	}
 	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
 	return command
+}
+
+func selectionWarning(err error) string {
+	if err == nil {
+		return ""
+	}
+	var missing *dotnet.MissingSDKError
+	if errors.As(err, &missing) && missing.RequestedVersion == "" {
+		return ""
+	}
+	return err.Error()
 }
