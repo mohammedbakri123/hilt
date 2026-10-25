@@ -119,7 +119,7 @@ func run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (Result, erro
 // empty environment; callers that want inheritance must pass os.Environ().
 func EnvWith(base []string, overrides map[string]string) []string {
 	if base == nil && len(overrides) == 0 {
-		return nil
+		return []string{}
 	}
 
 	values := make(map[string]string, len(base)+len(overrides))

@@ -128,8 +128,8 @@ func TestEnvWith(t *testing.T) {
 			t.Fatalf("EnvWith = %v, want %v", got, want)
 		}
 	}
-	if EnvWith(nil, nil) != nil {
-		t.Fatal("nil base and overrides should return nil")
+	if got := EnvWith(nil, nil); got == nil || len(got) != 0 {
+		t.Fatalf("nil base and overrides should return an empty non-nil environment, got %#v", got)
 	}
 }
 
