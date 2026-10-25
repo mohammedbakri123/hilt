@@ -1,12 +1,50 @@
 # Phase 2 handoff — hybrid toolchain model
 
-Status: approved, not implemented.
+Status: implemented through Stage F for managed SDKs.
 Date: 2026-10-25.
 Baseline commit: `75c1853` (`fix(dotnet): preserve locator priority in host ordering`).
 
-This document is the starting point for the next session. Phase 1 is complete and
-committed. Phase 2 adds managed SDK/runtime installation under a hybrid model:
-discover and use everything read-only, but write only Hilt-owned toolchains.
+This document started as the Phase 2 handoff. Phase 1 is complete and committed.
+Phase 2 implemented managed SDK installation, removal, and explicit update checks
+under a hybrid model: discover and use everything read-only, but write only
+Hilt-owned toolchains. Runtime installation and applying updates remain future
+work.
+
+## Implementation status
+
+Stages A–F are implemented. Managed-SDK commits:
+
+```text
+2ad8fc8 feat: expose selected toolchain in CLI, doctor, and TUI
+8e9573c feat(install): add manifest-backed managed SDK installs
+6bfeb78 feat(dotnet): discover manifest-owned install roots
+976e2d7 feat(cli): add hilt sdk install
+05e36ca feat(install): remove manifest-owned SDKs
+7655fe5 feat(cli): add hilt sdk remove
+a1fe7ea feat(install): check managed SDK updates
+d887bc2 feat(cli): add hilt sdk outdated
+8751e14 test(install): cover install then remove
+d0c825f fix(tui): point to managed sdk install command
+```
+
+Behavior decisions that differ from the original sketch:
+
+- Managed roots are per-version: `<managedRoot>/<version>`.
+- Installs use direct Microsoft `.tar.gz` archives, not `dotnet-install.sh`.
+- Managed mutations are CLI-only; the TUI remains read-only.
+- Update checks compare within the same `major.minor` release channel.
+- Runtime installation/removal and applying updates are not implemented.
+
+Verification on 2026-10-25:
+
+- `./scripts/verify.sh` passes: formatting, vet, tests, race tests, and build.
+- `HILT_TEST_REAL_DOTNET=1 go test ./internal/dotnet -run TestRealDotnetInventory -v`
+  passes against the host system SDK.
+- `bin/hilt doctor` exits `0` with the system SDK selected.
+- Temporary-XDG CLI checks cover owned removal, stale entries, unowned-managed
+  refusal, and no-managed-SDK update output.
+- Real Microsoft metadata/download was not exercised; tests use local HTTP
+  metadata and archive fixtures.
 
 ## Approved model
 
@@ -83,23 +121,28 @@ HILT_TEST_REAL_DOTNET=1 go test ./internal/dotnet -run TestRealDotnetInventory -
 - `internal/dotnet/version.go` — version parsing and comparison.
 - `internal/platform/paths.go` — `ManagedRoot` is `<data>/hilt/dotnet`.
 - `internal/app/app.go` — composition root. The locator is built once from
-  config, so a changed `managedRoot` requires a restart.
-- `internal/cli/` — cobra commands and JSON output. Inventory JSON already
-  includes hosts, SDKs, runtimes, warnings, and `generatedAt`.
+  config, so a changed `managedRoot` requires a restart. It loads the install
+  manifest, supplies ownership, and exposes install/remove/update backends.
+- `internal/install/` — Microsoft release metadata, archive validation and
+  extraction, SHA-512 checks, manifest, install lock, install/remove, and
+  update checks.
+- `internal/cli/` — cobra commands and JSON output. Inventory JSON includes
+  hosts, SDKs, runtimes, ownership, warnings, and `generatedAt`; managed SDK
+  commands include install, remove, and outdated.
 - `internal/diagnostics/` — doctor engine. The current `global-json` check uses
   exact version matching only and does not evaluate roll-forward.
 - `internal/tui/` — dashboard, SDK/runtime screen, diagnostics, settings.
 - `internal/config/` — schema version 1, atomic saves, unknown top-level fields
   preserved.
 
-Known gaps relevant to Phase 2:
+Remaining gaps after the managed-SDK work:
 
-- No ownership/manifest model.
-- No resolver or explicit selected toolchain.
-- No environment builder shared by future build/run commands.
-- `global-json` does not consider roll-forward or cross-root availability.
-- `hilt sdk list` shows system/managed but not owned or selected.
-- No installer, download, checksum, manifest, or removal code.
+- Runtime installation, removal, and update checks.
+- Applying SDK updates; channels, aliases, and prerelease policies.
+- TUI install/remove controls.
+- System package-manager integration.
+- `global-json` still does not evaluate roll-forward itself; selection relies on
+  the chosen root's `dotnet --version` behavior.
 - JSON schema version is `1`; additive fields are currently acceptable.
 
 ## Implementation stages
@@ -233,7 +276,7 @@ Acceptance:
 - A manually copied SDK under the managed root is visible but not removable.
 - A stale manifest entry is handled without deleting unrelated directories.
 
-### Stage F — verification and documentation
+### Stage F — verification and documentation (complete)
 
 Tasks:
 
@@ -275,28 +318,16 @@ Tasks:
 - Show the exact version and destination before a change.
 - Keep JSON output stable and additive.
 
-## Start here next session
+## Next work
 
-1. Read this file, `plan/04-dotnet-discovery.md`,
-   `plan/06-diagnostics.md`, `plan/08-cli.md`, and `docs/safety.md`.
-2. Confirm the worktree is clean and `./scripts/verify.sh` passes.
-3. Implement Stage A, then commit.
-4. Implement Stage B, then commit.
-5. Implement Stage C, then commit and demonstrate selection.
-6. Continue with Stage D only after the selection behavior is verified.
-7. Use small commits with conventional prefixes. Do not claim untested
+1. Confirm the worktree is clean and `./scripts/verify.sh` passes.
+2. Implement runtime install/remove/outdated using the same manifest and safety
+   model, or defer runtime work explicitly.
+3. Add update application only with explicit approval and the same checksum,
+   staging, verification, and rollback guarantees.
+4. Add TUI controls after the CLI flows are stable.
+5. Keep small commits with conventional prefixes. Do not claim untested
    behavior.
-
-Suggested commit sequence:
-
-```text
-feat(dotnet): track toolchain ownership separately from managed roots
-feat(dotnet): resolve managed and system toolchains
-feat(cli): show selected toolchain and source
-feat(install): add manifest-backed managed installs
-feat(cli): add managed sdk install and remove
-docs: document hybrid toolchain behavior
-```
 
 ## Deferred
 
@@ -305,6 +336,7 @@ docs: document hybrid toolchain behavior
 - Automatic `PATH` shims or shell startup edits.
 - Machine-wide or multi-user installs.
 - Channels, aliases, and automatic updates.
+- Runtime installation and applying updates (remaining Phase 2 work).
 - Project execution, NuGet, and templates (later phases).
 
 ## References
