@@ -39,6 +39,12 @@ type OwnershipFunc func(root, version string) bool
 
 func (f OwnershipFunc) Owns(root, version string) bool { return f(root, version) }
 
+// ManagedRootProvider optionally exposes additional Hilt-owned roots, such as
+// per-version managed install roots recorded in the install manifest.
+type ManagedRootProvider interface {
+	ManagedRoots() []string
+}
+
 // StatFunc is the subset of os.Stat used for discovery.
 type StatFunc func(string) (os.FileInfo, error)
 
@@ -165,20 +171,23 @@ func (l Locator) Locate() []Installation {
 }
 
 func (l Locator) knownRoots() []string {
-	if l.KnownRoots != nil {
-		return l.KnownRoots
+	roots := l.KnownRoots
+	if roots == nil {
+		roots = []string{
+			"/usr/share/dotnet",
+			"/usr/lib/dotnet",
+			"/usr/lib64/dotnet",
+			"/opt/dotnet",
+		}
+		if l.Home != "" {
+			roots = append(roots, filepath.Join(l.Home, ".dotnet"))
+		}
+		if l.ManagedRoot != "" {
+			roots = append(roots, l.ManagedRoot)
+		}
 	}
-	roots := []string{
-		"/usr/share/dotnet",
-		"/usr/lib/dotnet",
-		"/usr/lib64/dotnet",
-		"/opt/dotnet",
-	}
-	if l.Home != "" {
-		roots = append(roots, filepath.Join(l.Home, ".dotnet"))
-	}
-	if l.ManagedRoot != "" {
-		roots = append(roots, l.ManagedRoot)
+	if provider, ok := l.Ownership.(ManagedRootProvider); ok {
+		roots = append(append([]string(nil), roots...), provider.ManagedRoots()...)
 	}
 	return roots
 }

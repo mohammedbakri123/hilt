@@ -117,6 +117,38 @@ func TestLocatorClassifiesSystemAndExternal(t *testing.T) {
 	}
 }
 
+type managedRootProvider struct {
+	roots []string
+	owned bool
+}
+
+func (p managedRootProvider) Owns(string, string) bool { return p.owned }
+func (p managedRootProvider) ManagedRoots() []string   { return p.roots }
+
+func TestLocatorDiscoversProvidedManagedRoots(t *testing.T) {
+	managedRoot := t.TempDir()
+	versionRoot := filepath.Join(managedRoot, "10.0.100")
+	createRoot(t, versionRoot, "10.0.100")
+
+	locator := Locator{
+		LookPath:    func(string) (string, error) { return "", errors.New("not found") },
+		Stat:        os.Stat,
+		Getenv:      func(string) string { return "" },
+		ManagedRoot: managedRoot,
+		KnownRoots:  []string{},
+		SystemRoots: []string{},
+		Ownership:   managedRootProvider{roots: []string{versionRoot}, owned: true},
+	}
+	installations := locator.Locate()
+	if len(installations) != 1 {
+		t.Fatalf("Locate() returned %d installations: %+v", len(installations), installations)
+	}
+	installation := installations[0]
+	if installation.Root != versionRoot || !installation.Managed || !installation.Owned || installation.Provenance != ProvenanceOwned {
+		t.Errorf("installation = %+v", installation)
+	}
+}
+
 func TestLocatorSkipsMissingRoots(t *testing.T) {
 	locator := Locator{
 		LookPath:   func(string) (string, error) { return "", errors.New("not found") },

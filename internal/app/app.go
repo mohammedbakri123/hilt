@@ -9,6 +9,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/process"
 )
@@ -52,6 +53,12 @@ func New(version string) *App {
 	lookPath := exec.LookPath
 	cwd, _ := os.Getwd()
 
+	manifest, manifestErr := install.Load(paths.InstallManifestFile(), cfg.ManagedRoot)
+	if manifestErr != nil {
+		warnings = append(warnings, "install manifest: "+manifestErr.Error())
+		manifest = install.NewManifest(cfg.ManagedRoot)
+	}
+
 	return &App{
 		version:        version,
 		platform:       info,
@@ -66,6 +73,7 @@ func New(version string) *App {
 			Getenv:       os.Getenv,
 			ManagedRoot:  cfg.ManagedRoot,
 			Home:         home,
+			Ownership:    manifest,
 		},
 		prober:         dotnet.CLIProber{Runner: process.ExecRunner{}},
 		lookPath:       lookPath,
