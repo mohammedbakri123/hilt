@@ -237,6 +237,9 @@ func (m Model) footerContext() keyContext {
 	case m.screen == ScreenDiagnostics:
 		return ctxDiagnostics
 	case m.screen == ScreenProjects:
+		if m.projectFiltering {
+			return ctxProjectFilter
+		}
 		if m.projectsLoading {
 			return ctxProjectsLoading
 		}
@@ -521,9 +524,20 @@ func (m Model) projectLines(width int) []string {
 	}
 
 	result := m.projectResult
-	summary := fmt.Sprintf("  %d workspaces  ·  %d projects", len(result.Workspaces), len(result.Projects))
+	projectList := m.filteredProjects()
+	summary := fmt.Sprintf("  %d workspaces  ·  %d projects", len(result.Workspaces), len(projectList))
+	if m.projectFilter != "" {
+		summary = fmt.Sprintf("  %d workspaces  ·  %d/%d projects", len(result.Workspaces), len(projectList), len(result.Projects))
+	}
 	if m.projectsLoading {
 		summary += "  " + styleMuted.Render(m.spinner.View()+" rescanning...")
+	}
+	if m.projectFiltering || m.projectFilter != "" {
+		filter := "  filter: /" + m.projectFilter
+		if m.projectFiltering {
+			filter += "▌"
+		}
+		summary += "  ·" + styleMuted.Render(filter)
 	}
 	if m.projectSplit() {
 		summary += "  ·  " + styleMuted.Render("focus: "+m.focusLabel())
@@ -556,12 +570,17 @@ func (m Model) projectLines(width int) []string {
 	}
 
 	lines = append(lines, "", styleLabel.Render("PROJECTS"))
-	if len(result.Projects) == 0 {
-		lines = append(lines, "  "+styleMuted.Render("No .csproj files found."))
+	if len(projectList) == 0 {
+		if m.projectFilter != "" {
+			lines = append(lines, "  "+styleMuted.Render(fmt.Sprintf("No projects match %q.", m.projectFilter)))
+			lines = append(lines, "  "+styleMuted.Render("Press esc to clear the filter or / to edit it."))
+		} else {
+			lines = append(lines, "  "+styleMuted.Render("No .csproj files found."))
+		}
 	} else {
 		lines = append(lines, "    "+styleFaint.Render(fmt.Sprintf("%-22s %-28s %s", "NAME", "FRAMEWORKS", "PATH")))
 	}
-	for index, project := range result.Projects {
+	for index, project := range projectList {
 		lines = append(lines, m.projectRow(project, index, false))
 	}
 
@@ -591,6 +610,9 @@ func (m Model) projectRow(project projects.Project, index int, compact bool) str
 	if project.TestProject {
 		line += " " + styleOK.Render("[test]")
 	}
+	if m.projectIsExternal(project.Path) {
+		line += " " + styleWarning.Render("[external]")
+	}
 	if !compact {
 		line += " " + styleFaint.Render(project.Path)
 	}
@@ -614,11 +636,20 @@ func (m Model) projectListContent() ([]string, int) {
 	}
 	lines = append(lines, "", styleLabel.Render("PROJECTS"))
 	selectedLine := len(lines)
-	if len(result.Projects) == 0 {
-		return append(lines, "  "+styleMuted.Render("No .csproj files found.")), selectedLine
+	projectList := m.filteredProjects()
+	if len(projectList) == 0 {
+		if m.projectFilter != "" {
+			lines = append(lines,
+				"  "+styleMuted.Render(fmt.Sprintf("No projects match %q.", m.projectFilter)),
+				"  "+styleMuted.Render("Press esc to clear or / to edit."),
+			)
+		} else {
+			lines = append(lines, "  "+styleMuted.Render("No .csproj files found."))
+		}
+		return lines, selectedLine
 	}
 	lines = append(lines, styleFaint.Render("  NAME                  FRAMEWORKS"))
-	for index, project := range result.Projects {
+	for index, project := range projectList {
 		if index == m.projectCursor {
 			selectedLine = len(lines)
 		}
@@ -675,6 +706,9 @@ func (m Model) projectDetailContent(project projects.Project, width int) []strin
 	}
 	if project.TestProject {
 		content = append(content, kvSized("Test project", styleOK.Render("yes"), 12))
+	}
+	if m.projectIsExternal(project.Path) {
+		content = append(content, kvSized("Location", styleWarning.Render("external"), 12))
 	}
 	if len(project.ProjectReferences) > 0 {
 		content = append(content, kvSized("References", fmt.Sprintf("%d", len(project.ProjectReferences)), 12))

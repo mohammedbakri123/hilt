@@ -30,6 +30,7 @@ const (
 	actionSwitchInput     keyAction = "switch-input"
 	actionFramework       keyAction = "framework"
 	actionResolve         keyAction = "resolve"
+	actionFilter          keyAction = "filter"
 )
 
 type keyContext string
@@ -49,6 +50,7 @@ const (
 	ctxProjectsLoading keyContext = "projects-loading"
 	ctxProjects        keyContext = "projects"
 	ctxProjectSplit    keyContext = "project-split"
+	ctxProjectFilter   keyContext = "project-filter"
 	ctxSettings        keyContext = "settings"
 	ctxNarrow          keyContext = "narrow"
 	ctxHelpNavigation  keyContext = "help-navigation"
@@ -141,6 +143,7 @@ var keymap = map[keyContext]keyContextSpec{
 	ctxProjects: {CompactWidth: 90, Bindings: []keyBinding{
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
+		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
@@ -148,10 +151,16 @@ var keymap = map[keyContext]keyContextSpec{
 	ctxProjectSplit: {CompactWidth: 120, Bindings: []keyBinding{
 		{Key: "tab", Action: actionSwitchFocus, Label: "focus", Compact: true},
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
+	}},
+	ctxProjectFilter: {Bindings: []keyBinding{
+		{Key: "type", Action: actionFilter, Label: "filter", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "keep", Compact: true},
+		{Key: "esc", Action: actionCancel, Label: "clear", Compact: true},
 	}},
 	ctxSettings: {CompactWidth: 72, Bindings: []keyBinding{
 		{Key: "↑/↓", Action: actionMove, Label: "sections", Compact: true},
@@ -171,6 +180,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "tab", Action: actionNavigate, Label: "switch", Help: "switch list or section"},
 		{Key: "↑/↓  j/k", Action: actionMove, Label: "move", Help: "move selection or section"},
 		{Key: "enter", Action: actionConfirm, Label: "open", Help: "open section / confirm prompt"},
+		{Key: "/", Action: actionFilter, Label: "filter", Help: "filter the current list"},
 	}},
 	ctxHelpManaged: {Bindings: []keyBinding{
 		{Key: "i", Action: actionInstall, Label: "install", Help: "install SDK or runtime"},

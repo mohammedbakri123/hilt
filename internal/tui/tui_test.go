@@ -1445,6 +1445,7 @@ func TestKeymapActions(t *testing.T) {
 		{context: ctxOperation, key: "esc", want: actionCancelOperation},
 		{context: ctxSDKs, key: "u", want: actionUpdates},
 		{context: ctxProjectsLoading, key: "esc", want: actionCancelScan},
+		{context: ctxProjectFilter, key: "type", want: actionFilter},
 	}
 	for _, test := range tests {
 		got, ok := actionFor(test.context, test.key)
@@ -1485,6 +1486,10 @@ func TestFooterMatchesKeymap(t *testing.T) {
 	projectsLoading.screen = ScreenProjects
 	projectsLoading.projectsLoading = true
 
+	projectFiltering := loadedModel(t, newFakeBackend(), 160, 40)
+	projectFiltering.screen = ScreenProjects
+	projectFiltering.projectFiltering = true
+
 	settings := loadedModel(t, newFakeBackend(), 160, 40)
 	settings.screen = ScreenSettings
 
@@ -1510,6 +1515,7 @@ func TestFooterMatchesKeymap(t *testing.T) {
 		{name: "projects loading", model: projectsLoading, context: ctxProjectsLoading},
 		{name: "projects", model: openProjects(t, backend, 110, 30), context: ctxProjects},
 		{name: "project split", model: projects, context: ctxProjectSplit},
+		{name: "project filter", model: projectFiltering, context: ctxProjectFilter},
 		{name: "settings", model: settings, context: ctxSettings},
 	}
 	for _, test := range tests {
@@ -1657,5 +1663,97 @@ func TestProjectsNarrowLayoutKeepsTabNavigation(t *testing.T) {
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
 	if model.screen != ScreenSDKs {
 		t.Fatalf("tab navigated to %v, want SDKs", model.screen)
+	}
+}
+
+func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	model = press(t, model, key('j', "j"))
+	if selected, ok := model.selectedProject(); !ok || selected.Name != "Shop.Tests" {
+		t.Fatalf("selected = %+v", selected)
+	}
+
+	model = press(t, model, key('/', "/"))
+	if !model.projectFiltering {
+		t.Fatal("/ should start filtering")
+	}
+	for _, character := range "shop" {
+		model = press(t, model, key(character, string(character)))
+	}
+	if model.projectFilter != "shop" {
+		t.Fatalf("filter = %q, want shop", model.projectFilter)
+	}
+	if selected, ok := model.selectedProject(); !ok || selected.Name != "Shop.Tests" {
+		t.Fatalf("selection after filter = %+v", selected)
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"filter: /shop", "2/2 projects", "Shop.Tests"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("filtered list missing %q:\n%s", want, plain)
+		}
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	for _, character := range "zzz" {
+		model = press(t, model, key(character, string(character)))
+	}
+	plain = ansi.Strip(model.View().Content)
+	for _, want := range []string{`No projects match "zzz".`, "Press esc to clear"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("no-results state missing %q:\n%s", want, plain)
+		}
+	}
+	if _, ok := model.selectedProject(); ok {
+		t.Error("empty filter still reports a selection")
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.projectFilter != "" || model.projectFiltering {
+		t.Fatalf("esc did not clear the filter: %q filtering=%v", model.projectFilter, model.projectFiltering)
+	}
+	if _, ok := model.selectedProject(); !ok {
+		t.Fatal("clearing the filter should restore the project list")
+	}
+
+	model = press(t, model, key('/', "/"))
+	for _, character := range "tests" {
+		model = press(t, model, key(character, string(character)))
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if model.projectFiltering {
+		t.Fatal("enter should leave filter input")
+	}
+	if model.projectFilter != "tests" {
+		t.Fatalf("enter cleared the filter: %q", model.projectFilter)
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.projectFilter != "" {
+		t.Fatalf("esc did not clear the applied filter: %q", model.projectFilter)
+	}
+}
+
+func TestProjectsMarksExternalProjects(t *testing.T) {
+	backend := newFakeBackend()
+	backend.paths.ProjectsRoot = "/work"
+	result := projectFixture()
+	result.Projects = append(result.Projects, projects.Project{
+		Path:             "/elsewhere/Other/Other.csproj",
+		Name:             "Other",
+		Directory:        "/elsewhere/Other",
+		Kind:             projects.KindProject,
+		TargetFrameworks: []string{"net10.0"},
+		SDK:              "Microsoft.NET.Sdk",
+	})
+	backend.projectResult = result
+	model := openProjects(t, backend, 100, 30)
+	model = press(t, model, key('j', "j"))
+	model = press(t, model, key('j', "j"))
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"[external]", "Location", "external", "/elsewhere/Other/Other.csproj"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("external project missing %q:\n%s", want, plain)
+		}
 	}
 }

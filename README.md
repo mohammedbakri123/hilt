@@ -52,7 +52,8 @@ Phase 3 project discovery provides:
   ignores hidden paths unless `--all` is passed, guards symlink loops, and
   honors cancellation.
 - The TUI Projects & Solutions screen scans in the background, keeps the
-  selected project across refreshes, and shows declared metadata.
+  selected project across refreshes, supports `/` filtering, marks external
+  projects, and shows declared metadata in a sticky detail pane at wide widths.
 
 Not implemented: MSBuild evaluation, builds, run/test execution, `global.json`
 writes, NuGet operations, and templates. Empty project tabs state each gap

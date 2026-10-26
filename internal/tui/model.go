@@ -164,6 +164,8 @@ type Model struct {
 	projectListScroll   int
 	projectDetailScroll int
 	projectFocus        projectFocus
+	projectFilter       string
+	projectFiltering    bool
 	projectCancel       context.CancelFunc
 	projectRequest      int
 
@@ -454,12 +456,22 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.screen == ScreenProjects && m.projectFiltering {
+		return m.handleProjectFilterKey(message)
+	}
+
 	if m.prompt != promptNone {
 		return m.handlePromptKey(message)
 	}
 
 	if m.confirm != confirmNone {
 		return m.handleConfirmKey(message)
+	}
+
+	if m.screen == ScreenProjects && key == "esc" && m.projectFilter != "" {
+		m.setProjectFilter("")
+		m.projectFiltering = false
+		return m, nil
 	}
 
 	switch key {
@@ -526,6 +538,10 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.screen == ScreenProjects {
+		if key == "/" {
+			m.projectFiltering = true
+			return m, nil
+		}
 		if key == "tab" && m.projectSplit() {
 			m.toggleProjectFocus()
 			return m, nil
