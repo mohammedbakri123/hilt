@@ -674,6 +674,15 @@ func TestSDKTablesShowColumns(t *testing.T) {
 	}
 }
 
+func TestDashboardFooterShowsInstallHint(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 80, 24)
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+	footer := lines[len(lines)-1]
+	if !strings.Contains(footer, "i install SDK") || !strings.Contains(footer, "q quit") {
+		t.Fatalf("dashboard footer missing actions: %q", footer)
+	}
+}
+
 func TestSDKFooterKeepsQuitHint(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 80, 24)
 	model = press(t, model, key('2', "2"))

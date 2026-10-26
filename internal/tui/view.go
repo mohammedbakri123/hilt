@@ -162,6 +162,11 @@ func (m Model) renderFooter(width int) string {
 		hints = []keyHint{{"enter", "resolve"}, {"←/→", "framework"}, {"esc", "cancel"}}
 	case m.confirm != confirmNone:
 		hints = []keyHint{{"enter/y", "confirm"}, {"esc/n", "cancel"}}
+	case m.screen == ScreenDashboard:
+		hints = []keyHint{{"↑/↓", "sections"}, {"1-8", "jump"}, {"i", "install SDK"}, {"r", "refresh"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
+		if width < 90 {
+			hints = []keyHint{{"↑/↓", "sections"}, {"i", "install SDK"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
+		}
 	case m.screen == ScreenSDKs:
 		hints = []keyHint{{"tab", "switch list"}, {"↑/↓", "select"}, {"i", "install"}, {"x", "remove"}, {"u", "updates"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
 		if width < 110 {
