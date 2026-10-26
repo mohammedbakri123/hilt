@@ -164,7 +164,7 @@ func (m Model) renderFooter(width int) string {
 		hints = []keyHint{{"enter/y", "confirm"}, {"esc/n", "cancel"}}
 	case m.screen == ScreenDashboard:
 		hints = []keyHint{{"↑/↓", "sections"}, {"1-8", "jump"}, {"i", "install SDK"}, {"r", "refresh"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
-		if width < 90 {
+		if width < 100 {
 			hints = []keyHint{{"↑/↓", "sections"}, {"i", "install SDK"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
 		}
 	case m.screen == ScreenSDKs:
@@ -179,6 +179,9 @@ func (m Model) renderFooter(width int) string {
 		}
 	default:
 		hints = []keyHint{{"↑/↓", "sections"}, {"1-8", "jump"}, {"r", "refresh"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
+		if width < 72 {
+			hints = []keyHint{{"↑/↓", "sections"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
+		}
 	}
 
 	if width < 56 && len(hints) > 3 {
