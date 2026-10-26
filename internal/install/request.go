@@ -110,7 +110,7 @@ type releaseIndexChannel struct {
 	LatestSDK      string `json:"latest-sdk"`
 	LatestRuntime  string `json:"latest-runtime"`
 	SupportPhase   string `json:"support-phase"`
-	Type           string `json:"type"`
+	Type           string `json:"release-type"`
 }
 
 // active reports whether the channel is in an actively supported phase.
@@ -156,6 +156,12 @@ func (c *ReleaseClient) channelForAlias(ctx context.Context, request VersionRequ
 			continue
 		}
 		if request.Kind == RequestLTS && !channel.channelTypeLTS() {
+			continue
+		}
+		// Without --prerelease, an alias must resolve to a channel that
+		// actually ships a stable SDK; go-live/preview channels that only
+		// carry RCs are skipped.
+		if !request.AllowPrerelease && (strings.TrimSpace(channel.LatestSDK) == "" || strings.Contains(channel.LatestSDK, "-")) {
 			continue
 		}
 		eligible = append(eligible, candidate{channel: channel, number: number})

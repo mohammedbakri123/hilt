@@ -102,10 +102,10 @@ func newRequestClient(server *httptest.Server) *ReleaseClient {
 }
 
 const requestTestIndex = `{"releases-index":[
-	{"channel-version":"10.0","latest-release":"10.0.0","latest-sdk":"10.0.112","latest-runtime":"10.0.12","support-phase":"active","type":"lts"},
-	{"channel-version":"9.0","latest-sdk":"9.0.100","latest-runtime":"9.0.6","support-phase":"active","type":"sts"},
-	{"channel-version":"8.0","latest-sdk":"8.0.100","latest-runtime":"8.0.1","support-phase":"eol","type":"lts"},
-	{"channel-version":"11.0","latest-sdk":"11.0.1","latest-runtime":"11.0.2","support-phase":"preview","type":"preview"}
+	{"channel-version":"10.0","latest-release":"10.0.0","latest-sdk":"10.0.112","latest-runtime":"10.0.12","support-phase":"active","release-type":"lts"},
+	{"channel-version":"9.0","latest-sdk":"9.0.100","latest-runtime":"9.0.6","support-phase":"active","release-type":"sts"},
+	{"channel-version":"8.0","latest-sdk":"8.0.100","latest-runtime":"8.0.1","support-phase":"eol","release-type":"lts"},
+	{"channel-version":"11.0","latest-sdk":"11.0.1","latest-runtime":"11.0.2","support-phase":"preview","release-type":"preview"}
 ]}`
 
 // sdkChannelJSON returns channel metadata where only the resolved stable and
@@ -212,8 +212,8 @@ func TestChannelRequestResolvesPrereleaseWhenAllowed(t *testing.T) {
 
 func TestLTSAliasUnsupportedWithoutVerifiedChannel(t *testing.T) {
 	index := `{"releases-index":[
-		{"channel-version":"9.0","support-phase":"active","type":"sts"},
-		{"channel-version":"8.0","support-phase":"eol","type":"lts"}
+		{"channel-version":"9.0","support-phase":"active","release-type":"sts"},
+		{"channel-version":"8.0","support-phase":"eol","release-type":"lts"}
 	]}`
 	server := newRequestServer(t, index, nil)
 	defer server.Close()
@@ -231,7 +231,7 @@ func TestLTSAliasUnsupportedWithoutVerifiedChannel(t *testing.T) {
 }
 
 func TestLatestAliasWithoutActiveChannelsFails(t *testing.T) {
-	index := `{"releases-index":[{"channel-version":"8.0","support-phase":"eol","type":"lts"}]}`
+	index := `{"releases-index":[{"channel-version":"8.0","support-phase":"eol","release-type":"lts"}]}`
 	server := newRequestServer(t, index, nil)
 	defer server.Close()
 	client := newRequestClient(server)
