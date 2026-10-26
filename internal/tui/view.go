@@ -190,24 +190,34 @@ func (m Model) renderHelp(width, height int) string {
 	content := []string{
 		styleTitle.Render("Keyboard shortcuts"),
 		"",
-		"↑/↓  j/k      previous / next section",
-		"1-8           jump to a section",
-		"tab           switch SDK/runtime list, else cycle sections",
-		"enter         open selected section / confirm prompt",
-		"i             install the focused product",
-		"x             remove the selected owned item",
-		"u             check updates / apply the selected update",
-		"esc           close prompt or cancel an operation",
-		"r             refresh inventory",
-		"d             run diagnostics",
-		"pgup/pgdn     scroll content",
-		"ctrl+u/ctrl+d page scrolling",
-		"?             close help",
-		"q  ctrl+c     quit Hilt",
+		styleLabel.Render("NAVIGATION"),
+		helpLine("1-8", "jump to a section"),
+		helpLine("tab", "switch list or section"),
+		helpLine("↑/↓  j/k", "move selection or section"),
+		helpLine("enter", "open section / confirm prompt"),
+		"",
+		styleLabel.Render("MANAGED .NET"),
+		helpLine("i", "install SDK or runtime"),
+		helpLine("x", "remove a managed item"),
+		helpLine("u", "check or apply updates"),
+		helpLine("esc", "close prompt / cancel operation"),
+		"",
+		styleLabel.Render("VIEW"),
+		helpLine("r", "refresh inventory"),
+		helpLine("d", "run diagnostics"),
+		helpLine("pgup/pgdn", "scroll content"),
+		helpLine("? / esc", "close help"),
+		helpLine("q  ctrl+c", "quit Hilt"),
 	}
 	box := styleHelpBox.Render(strings.Join(content, "\n"))
-	body := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
-	return body
+	if lipgloss.Width(box) > width || lipgloss.Height(box) > height {
+		box = styleHelpBox.Padding(0, 1).Render(strings.Join(content, "\n"))
+	}
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func helpLine(keys, description string) string {
+	return "  " + styleKey.Render(fmt.Sprintf("%-12s", keys)) + " " + styleMuted.Render(description)
 }
 
 func renderTooSmall(width, height int) string {
@@ -694,13 +704,16 @@ func (m Model) diagnosticLines(width int) []string {
 	}
 
 	report := m.report
-	lines = append(lines, fmt.Sprintf("%d ok · %d info · %d warning · %d error",
-		report.Summary.OK, report.Summary.Info, report.Summary.Warnings, report.Summary.Errors))
+	lines = append(lines, fmt.Sprintf("%s %d   %s %d   %s %d   %s %d",
+		styleOK.Render("ok"), report.Summary.OK,
+		styleInfo.Render("info"), report.Summary.Info,
+		styleWarning.Render("warn"), report.Summary.Warnings,
+		styleError.Render("error"), report.Summary.Errors))
 	if m.loadingDoctor {
 		lines = append(lines, m.spinner.View()+" re-running checks...")
 	}
 
-	lines = append(lines, "")
+	lines = append(lines, "", styleLabel.Render("FINDINGS"))
 	for _, finding := range report.SortedFindings() {
 		lines = append(lines, severityBadge(finding.Severity)+" "+styleTitle.Render(finding.Title))
 		if finding.Summary != "" {
@@ -731,26 +744,39 @@ func (m Model) settingsLines(width int) []string {
 	}
 	paths := m.backend.Paths()
 	config := m.backend.Config()
-	lines = append(lines,
+	pathContent := []string{
 		kv("Configuration", paths.ConfigFile()),
 		kv("State", paths.StateFile()),
 		kv("Cache", paths.CacheDir),
 		kv("Data", paths.DataDir),
 		kv("Managed root", config.ManagedRoot),
-		"",
+	}
+	lines = append(lines, panelBox("PATHS", pathContent, width)...)
+	preferenceContent := []string{
 		kv("Default project dir", valueOr(config.DefaultProjectDir, "not set")),
 		kv("Editor", valueOr(config.Editor, "not set")),
 		kv("Theme", valueOr(config.UI.Theme, "auto")),
 		kv("Vim keys", fmt.Sprintf("%t", config.UI.VimKeys)),
 		kv("Scan exclusions", strings.Join(config.ScanExclusions, ", ")),
-		"",
-		styleMuted.Render("Settings editing is read-only. Edit the configuration file directly."),
-	)
+	}
+	for _, line := range wrap("Settings editing is read-only. Edit the configuration file directly.", width-6) {
+		preferenceContent = append(preferenceContent, styleMuted.Render(line))
+	}
+	lines = append(lines, panelBox("PREFERENCES", preferenceContent, width)...)
 	if len(m.backend.ConfigWarnings()) > 0 {
-		lines = append(lines, "", styleLabel.Render("CONFIGURATION WARNINGS"))
+		lines = append(lines, "")
+		content := make([]string, 0, len(m.backend.ConfigWarnings()))
 		for _, warning := range m.backend.ConfigWarnings() {
-			lines = append(lines, wrap(warning, width-2)...)
+			for index, line := range wrap(warning, width-6) {
+				if index == 0 {
+					line = "! " + line
+				} else {
+					line = "  " + line
+				}
+				content = append(content, styleWarning.Render(line))
+			}
 		}
+		lines = append(lines, panelBox("CONFIGURATION WARNINGS", content, width)...)
 	}
 	return lines
 }
@@ -774,13 +800,18 @@ func (m Model) warnings() []string {
 
 func placeholderLines(title string, phase int, description string, width int) []string {
 	lines := sectionHeader(title, width)
-	lines = append(lines,
+	content := []string{
 		styleWarning.Render("Not implemented."),
 		"",
-		description,
-		"",
-		fmt.Sprintf("Planned for Phase %d. This screen does not modify files or run commands yet.", phase),
-	)
+	}
+	for _, line := range wrap(description, width-6) {
+		content = append(content, line)
+	}
+	content = append(content, "")
+	for _, line := range wrap(fmt.Sprintf("Planned for Phase %d. This screen does not modify files or run commands yet.", phase), width-6) {
+		content = append(content, styleMuted.Render(line))
+	}
+	lines = append(lines, calloutBox("PLANNED", content, width)...)
 	return lines
 }
 

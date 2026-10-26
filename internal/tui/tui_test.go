@@ -483,6 +483,20 @@ func TestHelpOverlay(t *testing.T) {
 	}
 }
 
+func TestHelpFitsStandardTerminal(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 80, 24)
+	model = press(t, model, key('?', "?"))
+	view := model.View().Content
+	for _, want := range []string{"Keyboard shortcuts", "NAVIGATION", "MANAGED .NET", "VIEW", "refresh inventory"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help missing %q", want)
+		}
+	}
+	if lines := strings.Split(view, "\n"); len(lines) != 24 {
+		t.Fatalf("help has %d lines, want 24", len(lines))
+	}
+}
+
 func TestQuit(t *testing.T) {
 	model := Now(newFakeBackend())
 	updated, command := model.Update(key('q', "q"))
