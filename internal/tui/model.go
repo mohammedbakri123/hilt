@@ -15,6 +15,7 @@ import (
 	"io"
 
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/execution"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/projects"
@@ -48,6 +49,8 @@ type Backend interface {
 	RemoveRuntime(ctx context.Context, version string) (install.Removal, error)
 	CheckRuntimeUpdates(ctx context.Context) ([]install.Update, error)
 	ScanProjects(ctx context.Context, root string, includeHidden bool) (projects.Result, error)
+	BuildProject(ctx context.Context, request execution.BuildRequest, stdout, stderr io.Writer) (execution.Result, error)
+	RecordBuildTarget(target state.BuildTarget) error
 }
 
 // Screen identifies a main section.
@@ -189,6 +192,16 @@ type Model struct {
 	statusIsError bool
 
 	drawer outputDrawer
+
+	buildRun        int
+	buildRunning    bool
+	buildCancelling bool
+	buildCancel     context.CancelFunc
+	buildCh         chan tea.Msg
+	buildTarget     projects.Project
+	hasBuildTarget  bool
+	buildResult     *execution.Result
+	buildErr        error
 
 	spinner spinner.Model
 }
@@ -419,6 +432,23 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case buildLineMsg:
+		if message.run != m.buildRun {
+			return m, nil
+		}
+		m.appendDrawerLine(message.text)
+		if m.buildCh == nil {
+			return m, nil
+		}
+		return m, waitForBuild(m.buildCh)
+
+	case buildDoneMsg:
+		m.finishBuild(message)
+		if m.buildCh == nil {
+			return m, nil
+		}
+		return m, waitForBuild(m.buildCh)
+
 	case projectsMsg:
 		return m.handleProjectsMsg(message)
 
@@ -467,6 +497,10 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.quitConfirm = true
 		case "esc", "ctrl+c":
 			m.cancelOperation()
+		case "o":
+			if m.buildRunning {
+				m.drawer.open = !m.drawer.open
+			}
 		}
 		return m, nil
 	}
@@ -608,6 +642,8 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "b":
+			return m, m.startBuild()
 		case ",":
 			m.moveProjectTab(-1)
 			return m, nil
@@ -667,10 +703,13 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) busy() bool {
-	return m.operationRunning || m.loadingUpdates
+	return m.operationRunning || m.loadingUpdates || m.buildRunning
 }
 
 func (m Model) busyLabel() string {
+	if m.buildRunning {
+		return "Building " + m.buildTarget.Name
+	}
 	if m.operationRunning {
 		if m.operationLabel != "" {
 			return m.operationLabel
@@ -686,6 +725,9 @@ func (m Model) busyLabel() string {
 func (m Model) handleQuitConfirmKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "y", "enter":
+		if m.buildCancel != nil {
+			m.buildCancel()
+		}
 		return m, tea.Quit
 	case "esc", "n", "ctrl+c":
 		m.quitConfirm = false

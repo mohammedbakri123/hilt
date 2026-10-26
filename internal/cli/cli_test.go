@@ -14,6 +14,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/execution"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/projects"
@@ -61,6 +62,12 @@ func (f fakeBackend) ConfigWarnings() []string {
 	return nil
 }
 func (f fakeBackend) State() state.State { return state.Defaults() }
+func (f fakeBackend) BuildProject(context.Context, execution.BuildRequest, io.Writer, io.Writer) (execution.Result, error) {
+	return execution.Result{}, nil
+}
+func (f fakeBackend) RecordBuildTarget(state.BuildTarget) error {
+	return nil
+}
 func (f fakeBackend) RecordProjectOpen(string, string) error {
 	return nil
 }

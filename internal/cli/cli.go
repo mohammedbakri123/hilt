@@ -13,6 +13,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/execution"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/projects"
@@ -43,6 +44,8 @@ type Backend interface {
 	CheckRuntimeUpdates(ctx context.Context) ([]install.Update, error)
 	ScanProjects(ctx context.Context, root string, includeHidden bool) (projects.Result, error)
 	InspectProject(ctx context.Context, path string) (projects.Inspection, error)
+	BuildProject(ctx context.Context, request execution.BuildRequest, stdout, stderr io.Writer) (execution.Result, error)
+	RecordBuildTarget(target state.BuildTarget) error
 	Diagnose(ctx context.Context) diagnostics.Report
 	Tool(name string) (string, bool)
 }

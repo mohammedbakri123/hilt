@@ -226,6 +226,11 @@ func (m Model) footerContext() keyContext {
 		return ctxHelp
 	case m.operationRunning:
 		return ctxOperation
+	case m.buildRunning:
+		if m.drawer.open {
+			return ctxBuildOutput
+		}
+		return ctxBuild
 	case m.loadingUpdates:
 		return ctxUpdates
 	case m.prompt == promptInstallSDK:
@@ -786,6 +791,14 @@ func (m Model) projectTabContent(project projects.Project, width int) []string {
 			styleMuted.Render("EF Design support and dotnet-ef are not wired yet. Hilt never installs dotnet-ef automatically."),
 		}
 	case projectTabOutput:
+		if m.hasBuildTarget && m.buildTarget.Path == project.Path {
+			lines := []string{styleMuted.Render("Build output streams in the bottom drawer.")}
+			if m.buildResult != nil {
+				lines = append(lines, "", kvSized("Last build", buildDrawerStatus(*m.buildResult, m.buildErr), 14))
+			}
+			lines = append(lines, "", styleMuted.Render("Press o to open or close the output drawer."))
+			return lines
+		}
 		return []string{
 			styleMuted.Render("No build or run output yet."),
 			"",

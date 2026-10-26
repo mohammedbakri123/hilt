@@ -595,6 +595,10 @@ func (m *Model) confirmAction() tea.Cmd {
 }
 
 func (m *Model) cancelOperation() {
+	if m.buildRunning {
+		m.cancelBuild()
+		return
+	}
 	if m.operationRunning && m.operationCancel != nil {
 		m.operationCancel()
 		m.operationCancelling = true

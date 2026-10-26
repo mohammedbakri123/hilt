@@ -57,6 +57,8 @@ const (
 	ctxProjectFilter   keyContext = "project-filter"
 	ctxSettings        keyContext = "settings"
 	ctxOutput          keyContext = "output"
+	ctxBuild           keyContext = "build"
+	ctxBuildOutput     keyContext = "build-output"
 	ctxNarrow          keyContext = "narrow"
 	ctxHelpNavigation  keyContext = "help-navigation"
 	ctxHelpManaged     keyContext = "help-managed"
@@ -169,6 +171,16 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
+		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
+	}},
+	ctxBuild: {Bindings: []keyBinding{
+		{Key: "esc", Action: actionCancelOperation, Label: "cancel build", Compact: true},
+		{Key: "o", Action: actionToggleOutput, Label: "open output", Compact: true},
+		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
+	}},
+	ctxBuildOutput: {Bindings: []keyBinding{
+		{Key: "esc", Action: actionCancelOperation, Label: "cancel build", Compact: true},
+		{Key: "o", Action: actionToggleOutput, Label: "close", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
 	ctxOutput: {CompactWidth: 72, Bindings: []keyBinding{

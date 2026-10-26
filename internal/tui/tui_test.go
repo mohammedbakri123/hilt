@@ -17,8 +17,10 @@ import (
 	"io"
 
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/execution"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
+	"github.com/mohammedbakri123/hilt/internal/process"
 	"github.com/mohammedbakri123/hilt/internal/projects"
 	"github.com/mohammedbakri123/hilt/internal/state"
 )
@@ -109,6 +111,14 @@ type fakeBackend struct {
 	projectCalls        *int
 	state               *state.State
 	stateErr            error
+	buildResult         execution.Result
+	buildErr            error
+	buildLines          []string
+	buildStarted        chan struct{}
+	buildBlock          chan struct{}
+	buildRequests       *[]execution.BuildRequest
+	buildRecords        *[]state.BuildTarget
+	buildRecordErr      error
 }
 
 func (f fakeBackend) Version() string          { return "test" }
@@ -121,6 +131,48 @@ func (f fakeBackend) State() state.State {
 	}
 	return *f.state
 }
+func (f fakeBackend) BuildProject(ctx context.Context, request execution.BuildRequest, stdout, stderr io.Writer) (execution.Result, error) {
+	f.record("build")
+	if f.buildRequests != nil {
+		*f.buildRequests = append(*f.buildRequests, request)
+	}
+	if f.buildStarted != nil {
+		close(f.buildStarted)
+	}
+	if len(f.buildLines) > 0 && stdout != nil {
+		_, _ = io.WriteString(stdout, strings.Join(f.buildLines, "\n")+"\n")
+	}
+	if f.buildBlock != nil {
+		select {
+		case <-f.buildBlock:
+		case <-ctx.Done():
+			result := f.buildResult
+			result.Started = true
+			result.Cancelled = true
+			return result, ctx.Err()
+		}
+	}
+	if f.buildErr != nil {
+		return f.buildResult, f.buildErr
+	}
+	return f.buildResult, nil
+}
+
+func (f fakeBackend) RecordBuildTarget(target state.BuildTarget) error {
+	f.record("record-build")
+	if f.buildRecords != nil {
+		*f.buildRecords = append(*f.buildRecords, target)
+	}
+	if f.buildRecordErr != nil {
+		return f.buildRecordErr
+	}
+	if f.state != nil {
+		copy := target
+		f.state.LastBuild = &copy
+	}
+	return nil
+}
+
 func (f fakeBackend) RecordProjectOpen(projectPath, workspacePath string) error {
 	if f.stateErr != nil {
 		return f.stateErr
@@ -1535,6 +1587,14 @@ func TestFooterMatchesKeymap(t *testing.T) {
 	drawer := loadedModel(t, newFakeBackend(), 160, 40)
 	drawer.drawer.open = true
 
+	building := loadedModel(t, newFakeBackend(), 160, 40)
+	building.buildRunning = true
+	building.buildTarget = projectFixture().Projects[0]
+	building.drawer.status = "building · Shop"
+
+	buildingOutput := building
+	buildingOutput.drawer.open = true
+
 	tests := []struct {
 		name    string
 		model   Model
@@ -1555,6 +1615,8 @@ func TestFooterMatchesKeymap(t *testing.T) {
 		{name: "project split", model: projects, context: ctxProjectSplit},
 		{name: "project filter", model: projectFiltering, context: ctxProjectFilter},
 		{name: "output", model: drawer, context: ctxOutput},
+		{name: "building", model: building, context: ctxBuild},
+		{name: "building output", model: buildingOutput, context: ctxBuildOutput},
 		{name: "settings", model: settings, context: ctxSettings},
 	}
 	for _, test := range tests {
@@ -2020,5 +2082,391 @@ func TestOutputDrawerFollowAndScroll(t *testing.T) {
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnd})
 	if !model.drawer.follow {
 		t.Fatal("end should resume follow")
+	}
+}
+
+func startBuildAndDrain(t *testing.T, model *Model, command tea.Cmd) []tea.Msg {
+	t.Helper()
+	if command == nil {
+		t.Fatal("build returned no command")
+	}
+	batch, ok := command().(tea.BatchMsg)
+	if !ok || len(batch) < 2 {
+		t.Fatalf("build command returned %T, want a batch", command())
+	}
+	done := make(chan tea.Msg, 1)
+	go func() {
+		done <- batch[0]()
+	}()
+	messages := make([]tea.Msg, 0, 8)
+	for message := range model.buildCh {
+		messages = append(messages, message)
+	}
+	messages = append(messages, <-done)
+	return messages
+}
+
+func TestBuildStreamsOutputAndPersistsTarget(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	requests := []execution.BuildRequest{}
+	records := []state.BuildTarget{}
+	backend.buildRequests = &requests
+	backend.buildRecords = &records
+	backend.buildResult = execution.Result{ExitCode: 0, Duration: 1250 * time.Millisecond, Started: true}
+	backend.buildLines = []string{"Build succeeded.", "warning: NU1900"}
+
+	model := openProjects(t, backend, 120, 40)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("b should return a build command")
+	}
+	if !model.buildRunning || !model.drawer.open || !model.drawer.follow {
+		t.Fatalf("build state: running=%v open=%v follow=%v", model.buildRunning, model.drawer.open, model.drawer.follow)
+	}
+	if backend.calls.count("build") != 0 {
+		t.Fatal("build must not run inside Update")
+	}
+	if !strings.Contains(ansi.Strip(model.View().Content), "OUTPUT") || !strings.Contains(ansi.Strip(model.View().Content), "building") {
+		t.Fatalf("building drawer missing: %q", ansi.Strip(model.View().Content))
+	}
+
+	messages := startBuildAndDrain(t, &model, command)
+	model = applyMessages(t, model, messages)
+	if backend.calls.count("build") != 1 || backend.calls.count("record-build") != 1 {
+		t.Fatalf("calls = %v", backend.calls.snapshot())
+	}
+	if model.buildRunning || model.buildCancelling {
+		t.Fatalf("build did not finish: running=%v cancelling=%v", model.buildRunning, model.buildCancelling)
+	}
+	if model.buildResult == nil || model.buildResult.ExitCode != 0 {
+		t.Fatalf("result = %+v", model.buildResult)
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Build succeeded.", "warning: NU1900", "exit 0", "Built Shop in 1.25s."} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("completed build missing %q:\n%s", want, plain)
+		}
+	}
+	if len(requests) != 1 {
+		t.Fatalf("requests = %+v", requests)
+	}
+	request := requests[0]
+	if request.DotnetPath != "/usr/share/dotnet/dotnet" ||
+		request.ProjectPath != "/work/src/Shop/Shop.csproj" ||
+		request.WorkingDirectory != "/work/src/Shop" ||
+		request.Configuration != "Debug" {
+		t.Errorf("request = %+v", request)
+	}
+	if len(request.Environment) == 0 {
+		t.Error("build must use the selected toolchain environment")
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %+v", records)
+	}
+	record := records[0]
+	if record.ProjectPath != "/work/src/Shop/Shop.csproj" ||
+		record.WorkspacePath != "/work/Shop.sln" ||
+		record.SDKVersion != "10.0.112" ||
+		record.Configuration != "Debug" {
+		t.Errorf("record = %+v", record)
+	}
+	if model.backend.State().LastBuild == nil || model.backend.State().LastBuild.ProjectPath != record.ProjectPath {
+		t.Errorf("last build not persisted: %+v", model.backend.State().LastBuild)
+	}
+	view := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Shop", "SDK 10.0.112", "/work/src/Shop", "dotnet build"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("drawer metadata missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestBuildNonZeroExitShowsFailureAndRecordsTarget(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	records := []state.BuildTarget{}
+	backend.buildRecords = &records
+	backend.buildResult = execution.Result{ExitCode: 2, Duration: 80 * time.Millisecond, Started: true}
+	backend.buildErr = &process.ExitError{Code: 2}
+	backend.buildLines = []string{"error CS0001: broken"}
+
+	model := openProjects(t, backend, 120, 40)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	model = applyMessages(t, model, startBuildAndDrain(t, &model, command))
+
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Build failed: Shop exited with code 2.", "error CS0001", "exit 2"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("failure missing %q:\n%s", want, plain)
+		}
+	}
+	if !model.statusIsError {
+		t.Error("failed build should set an error status")
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %+v, want the exercised target", records)
+	}
+}
+
+func TestBuildCancellation(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	records := []state.BuildTarget{}
+	backend.buildRecords = &records
+	backend.buildResult = execution.Result{ExitCode: -1, Started: true}
+	backend.buildBlock = make(chan struct{})
+	backend.buildStarted = make(chan struct{})
+
+	model := openProjects(t, backend, 120, 40)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	batch := command().(tea.BatchMsg)
+	done := make(chan tea.Msg, 1)
+	go func() {
+		done <- batch[0]()
+	}()
+	<-backend.buildStarted
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !model.buildCancelling || !model.buildRunning {
+		t.Fatalf("escape should request cancellation: running=%v cancelling=%v", model.buildRunning, model.buildCancelling)
+	}
+	if !strings.Contains(model.statusMessage, "Cancelling build") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+	model = apply(t, model, <-done)
+	if model.buildRunning || model.buildCancelling {
+		t.Fatal("cancelled build should finish")
+	}
+	if !strings.Contains(model.statusMessage, "Build cancelled.") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+	if !strings.Contains(ansi.Strip(model.View().Content), "cancelled") {
+		t.Fatalf("drawer status missing cancellation: %q", ansi.Strip(model.View().Content))
+	}
+	if len(records) != 1 {
+		t.Fatalf("cancelled but started builds should be recorded: %+v", records)
+	}
+}
+
+func TestBuildStartFailureIsNotRecorded(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	records := []state.BuildTarget{}
+	backend.buildRecords = &records
+	backend.buildResult = execution.Result{ExitCode: -1}
+	backend.buildErr = errors.New("start failed")
+
+	model := openProjects(t, backend, 120, 40)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	model = applyMessages(t, model, startBuildAndDrain(t, &model, command))
+
+	if len(records) != 0 {
+		t.Fatalf("start failure must not record a build target: %+v", records)
+	}
+	if model.backend.State().LastBuild != nil {
+		t.Fatalf("start failure persisted state: %+v", model.backend.State().LastBuild)
+	}
+	if !strings.Contains(model.statusMessage, "Build failed") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+}
+
+func TestBuildRequiresProjectAndSDK(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projects.Result{Root: "/work"}
+	model := openProjects(t, backend, 100, 30)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	if command != nil {
+		t.Fatal("build without a project must not return a command")
+	}
+	if !strings.Contains(model.statusMessage, "Select a project") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+
+	backend = newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.selection = dotnet.Selection{}
+	model = openProjects(t, backend, 100, 30)
+	updated, command = model.Update(key('b', "b"))
+	model = updated.(Model)
+	if command != nil {
+		t.Fatal("build without an SDK must not return a command")
+	}
+	if !strings.Contains(model.statusMessage, "No usable .NET SDK") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+}
+
+func TestQuitDuringBuildRequiresConfirmation(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.buildResult = execution.Result{ExitCode: -1, Started: true}
+	backend.buildBlock = make(chan struct{})
+	backend.buildStarted = make(chan struct{})
+
+	model := openProjects(t, backend, 120, 40)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	batch := command().(tea.BatchMsg)
+	done := make(chan tea.Msg, 1)
+	go func() {
+		done <- batch[0]()
+	}()
+	<-backend.buildStarted
+
+	updated, command = model.Update(key('q', "q"))
+	model = updated.(Model)
+	if command != nil || !model.quitConfirm {
+		t.Fatalf("q during build should confirm: confirm=%v command=%v", model.quitConfirm, command)
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"An operation is still running", "Building Shop"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("quit dialog missing %q", want)
+		}
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !model.buildRunning {
+		t.Fatal("escaping the quit dialog must not cancel the build")
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = apply(t, model, <-done)
+	if model.buildRunning {
+		t.Fatal("build should be cancelled")
+	}
+}
+
+func TestBuildOutputDrawerCanCloseWhileBuilding(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.buildResult = execution.Result{ExitCode: 0, Started: true}
+	backend.buildBlock = make(chan struct{})
+	backend.buildStarted = make(chan struct{})
+
+	model := openProjects(t, backend, 120, 40)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	batch := command().(tea.BatchMsg)
+	done := make(chan tea.Msg, 1)
+	go func() {
+		done <- batch[0]()
+	}()
+	<-backend.buildStarted
+
+	model = press(t, model, key('o', "o"))
+	if model.drawer.open {
+		t.Fatal("o should close the drawer while building")
+	}
+	if !model.buildRunning {
+		t.Fatal("closing the drawer must not cancel the build")
+	}
+	model = press(t, model, key('o', "o"))
+	if !model.drawer.open {
+		t.Fatal("o should reopen the drawer while building")
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = apply(t, model, <-done)
+}
+
+func TestBuildStreamWriterSerializesAndFlushes(t *testing.T) {
+	ch := make(chan tea.Msg, 8)
+	stdout := &buildStreamWriter{ch: ch, run: 3}
+	stderr := &buildStreamWriter{ch: ch, run: 3}
+	var wait sync.WaitGroup
+	wait.Add(2)
+	go func() {
+		defer wait.Done()
+		_, _ = stdout.Write([]byte("stdout one\nstdout two\n"))
+	}()
+	go func() {
+		defer wait.Done()
+		_, _ = stderr.Write([]byte("stderr one\npartial"))
+	}()
+	wait.Wait()
+	stdout.Flush()
+	stderr.Flush()
+	close(ch)
+
+	lines := map[string]bool{}
+	for message := range ch {
+		line, ok := message.(buildLineMsg)
+		if !ok {
+			t.Fatalf("message = %T", message)
+		}
+		if line.run != 3 {
+			t.Errorf("run = %d, want 3", line.run)
+		}
+		lines[line.text] = true
+	}
+	for _, want := range []string{"stdout one", "stdout two", "stderr one", "partial"} {
+		if !lines[want] {
+			t.Errorf("missing line %q: %v", want, lines)
+		}
+	}
+}
+
+func TestBuildStreamsIntoDrawerWhileRunning(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.buildResult = execution.Result{ExitCode: -1, Started: true}
+	backend.buildLines = []string{"first line", "second line"}
+	backend.buildBlock = make(chan struct{})
+	backend.buildStarted = make(chan struct{})
+
+	model := openProjects(t, backend, 120, 40)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	batch := command().(tea.BatchMsg)
+	done := make(chan tea.Msg, 1)
+	go func() {
+		done <- batch[0]()
+	}()
+	<-backend.buildStarted
+
+	for index := 0; index < 2; index++ {
+		select {
+		case message := <-model.buildCh:
+			model = apply(t, model, message)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for build output")
+		}
+	}
+	if !model.buildRunning {
+		t.Fatal("build should still be running while output streams")
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"first line", "second line", "building"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("streaming drawer missing %q:\n%s", want, plain)
+		}
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = apply(t, model, <-done)
+}
+
+func TestBuildRecordFailureIsVisible(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.buildResult = execution.Result{ExitCode: 0, Duration: time.Second, Started: true}
+	backend.buildRecordErr = errors.New("disk full")
+
+	model := openProjects(t, backend, 120, 40)
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	model = applyMessages(t, model, startBuildAndDrain(t, &model, command))
+
+	if !strings.Contains(model.statusMessage, "Could not save the last build target") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+	if !model.statusIsError {
+		t.Fatal("record failure should be reported as an error")
 	}
 }
