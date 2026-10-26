@@ -17,6 +17,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 // Backend is the data and managed-operation surface the TUI needs.
@@ -43,6 +44,7 @@ type Backend interface {
 	InstallRuntime(ctx context.Context, plan install.RuntimePlan, progress io.Writer) (install.RuntimeResult, error)
 	RemoveRuntime(ctx context.Context, version string) (install.Removal, error)
 	CheckRuntimeUpdates(ctx context.Context) ([]install.Update, error)
+	ScanProjects(ctx context.Context, root string, includeHidden bool) (projects.Result, error)
 }
 
 // Screen identifies a main section.
@@ -91,6 +93,12 @@ type inventoryMsg struct {
 
 type doctorMsg struct {
 	report diagnostics.Report
+}
+
+type projectsMsg struct {
+	request int
+	result  projects.Result
+	err     error
 }
 
 // Model is the root Bubble Tea model.
@@ -151,6 +159,15 @@ type Model struct {
 	progressLines       []string
 	progressDone        int64
 	progressTotal       int64
+
+	projectsLoading bool
+	projectsLoaded  bool
+	projectResult   *projects.Result
+	projectsErr     error
+	projectCursor   int
+	projectScroll   int
+	projectCancel   context.CancelFunc
+	projectRequest  int
 
 	updates        []install.Update
 	runtimeUpdates []install.Update
@@ -390,6 +407,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case projectsMsg:
+		return m.handleProjectsMsg(message)
+
 	case doctorMsg:
 		m.loadingDoctor = false
 		report := message.report
@@ -433,6 +453,11 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.projectsLoading && m.screen == ScreenProjects && key == "esc" {
+		m.cancelProjects()
+		return m, nil
+	}
+
 	if m.prompt != promptNone {
 		return m.handlePromptKey(message)
 	}
@@ -453,6 +478,11 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.screen == ScreenDiagnostics {
 			m.loadingDoctor = true
 			commands = append(commands, m.doctorCmd())
+		}
+		if m.screen == ScreenProjects {
+			if command := m.startProjectsScan(); command != nil {
+				commands = append(commands, command)
+			}
 		}
 		return m, tea.Batch(commands...)
 	case "d":
@@ -496,6 +526,17 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, m.beginUpdate()
 			}
 			return m, m.beginUpdateCheck()
+		}
+	}
+
+	if m.screen == ScreenProjects {
+		switch key {
+		case "up", "k":
+			m.moveProject(-1)
+			return m, nil
+		case "down", "j":
+			m.moveProject(1)
+			return m, nil
 		}
 	}
 
@@ -672,6 +713,9 @@ func (m *Model) navigate(target Screen) tea.Cmd {
 		m.loadingDoctor = true
 		return m.doctorCmd()
 	}
+	if target == ScreenProjects && !m.projectsLoaded && !m.projectsLoading {
+		return m.startProjectsScan()
+	}
 	return nil
 }
 
@@ -680,10 +724,14 @@ func (m *Model) scrollBy(delta int) {
 }
 
 func (m Model) scrollOffset() int {
-	if m.screen == ScreenDiagnostics {
+	switch m.screen {
+	case ScreenDiagnostics:
 		return m.diagScroll
+	case ScreenProjects:
+		return m.projectScroll
+	default:
+		return m.sdkScroll
 	}
-	return m.sdkScroll
 }
 
 func (m *Model) setScroll(value int) {
@@ -694,9 +742,12 @@ func (m *Model) setScroll(value int) {
 	if value > max {
 		value = max
 	}
-	if m.screen == ScreenDiagnostics {
+	switch m.screen {
+	case ScreenDiagnostics:
 		m.diagScroll = value
-	} else {
+	case ScreenProjects:
+		m.projectScroll = value
+	default:
 		m.sdkScroll = value
 	}
 }

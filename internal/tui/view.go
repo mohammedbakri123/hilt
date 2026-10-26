@@ -11,6 +11,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 // View renders the whole application.
@@ -183,6 +184,15 @@ func (m Model) renderFooter(width int) string {
 		if width < 100 {
 			hints = []keyHint{{"↑/↓", "sections"}, {"r", "re-run"}, {"?", "help"}, {"q", "quit"}}
 		}
+	case m.screen == ScreenProjects:
+		if m.projectsLoading {
+			hints = []keyHint{{"esc", "cancel scan"}, {"?", "help"}, {"q", "quit"}}
+		} else {
+			hints = []keyHint{{"↑/↓", "select"}, {"r", "rescan"}, {"pgup/pgdn", "scroll"}, {"?", "help"}, {"q", "quit"}}
+			if width < 90 {
+				hints = []keyHint{{"↑/↓", "select"}, {"r", "rescan"}, {"?", "help"}, {"q", "quit"}}
+			}
+		}
 	default:
 		hints = []keyHint{{"↑/↓", "sections"}, {"1-8", "jump"}, {"r", "refresh"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
 		if width < 72 {
@@ -266,8 +276,7 @@ func (m Model) screenLines(width int) []string {
 	case ScreenSettings:
 		return m.settingsLines(width)
 	case ScreenProjects:
-		return placeholderLines("Projects & Solutions", 3,
-			"Discover solutions and projects, inspect metadata, and build, run, or test them.", width)
+		return m.projectLines(width)
 	case ScreenPackages:
 		return placeholderLines("NuGet Packages", 4,
 			"List, search, add, update, and remove NuGet packages for a selected project.", width)
@@ -427,6 +436,100 @@ func panelBox(title string, content []string, width int) []string {
 	}
 	box := stylePanel.Width(width).Render(strings.Join(body, "\n"))
 	return strings.Split(box, "\n")
+}
+
+func (m Model) projectLines(width int) []string {
+	lines := sectionHeader("Projects & Solutions", width)
+	if m.backend == nil {
+		return append(lines, "No backend configured.")
+	}
+	if m.projectsLoading && m.projectResult == nil {
+		return append(lines, m.spinner.View()+" scanning projects...")
+	}
+	if m.projectsErr != nil {
+		for _, line := range styledWrapped("Project scan failed: "+m.projectsErr.Error(), width-2, styleError) {
+			lines = append(lines, line)
+		}
+	}
+	if m.projectResult == nil {
+		return append(lines, "Projects not loaded. Press r to scan.")
+	}
+
+	result := m.projectResult
+	summary := fmt.Sprintf("  %d workspaces  ·  %d projects", len(result.Workspaces), len(result.Projects))
+	if m.projectsLoading {
+		summary += "  " + styleMuted.Render(m.spinner.View()+" rescanning...")
+	}
+	lines = append(lines, styleMuted.Render(summary))
+
+	lines = append(lines, "", styleLabel.Render("WORKSPACES"))
+	if len(result.Workspaces) == 0 {
+		lines = append(lines, "  "+styleMuted.Render("none found"))
+	}
+	for _, workspace := range result.Workspaces {
+		line := "  " + styleValue.Render(workspace.Name) + "  " +
+			styleMuted.Render("["+string(workspace.Kind)+"] "+workspace.Path)
+		line += styleFaint.Render(fmt.Sprintf("  (%d projects)", len(workspace.ProjectPaths)))
+		lines = append(lines, line)
+	}
+
+	lines = append(lines, "", styleLabel.Render("PROJECTS"))
+	if len(result.Projects) == 0 {
+		lines = append(lines, "  "+styleMuted.Render("No .csproj files found."))
+	} else {
+		lines = append(lines, "    "+styleFaint.Render(fmt.Sprintf("%-22s %-28s %s", "NAME", "FRAMEWORKS", "PATH")))
+	}
+	for index, project := range result.Projects {
+		marker := " "
+		name := fmt.Sprintf("%-22s", project.Name)
+		if index == m.projectCursor {
+			marker = styleAccent.Render(">")
+			name = styleValue.Render(name)
+		}
+		frameworks := valueOr(strings.Join(project.TargetFrameworks, ", "), "none")
+		line := "  " + marker + " " + name + " " + styleMuted.Render(fmt.Sprintf("%-28s", frameworks))
+		if project.TestProject {
+			line += " " + styleOK.Render("[test]")
+		}
+		line += " " + styleFaint.Render(project.Path)
+		lines = append(lines, line)
+	}
+
+	if project, ok := m.selectedProject(); ok {
+		lines = append(lines, "")
+		lines = append(lines, projectDetailPanel(project, width)...)
+	}
+
+	if len(result.Warnings) > 0 {
+		lines = append(lines, "", styleLabel.Render("WARNINGS"))
+		for _, warning := range result.Warnings {
+			for _, line := range wrap(warning, width-2) {
+				lines = append(lines, styleWarning.Render("  ! "+line))
+			}
+		}
+	}
+	return lines
+}
+
+func projectDetailPanel(project projects.Project, width int) []string {
+	content := []string{
+		kvSized("Path", project.Path, 12),
+		kvSized("Frameworks", valueOr(strings.Join(project.TargetFrameworks, ", "), "none"), 12),
+		kvSized("SDK", valueOr(project.SDK, "unknown"), 12),
+		kvSized("Output", valueOr(project.OutputType, "default"), 12),
+	}
+	if project.TestProject {
+		content = append(content, kvSized("Test project", styleOK.Render("yes"), 12))
+	}
+	if len(project.ProjectReferences) > 0 {
+		content = append(content, kvSized("References", fmt.Sprintf("%d", len(project.ProjectReferences)), 12))
+		for _, reference := range project.ProjectReferences {
+			for _, line := range wrap("  "+reference, width-6) {
+				content = append(content, styleMuted.Render(line))
+			}
+		}
+	}
+	return panelBox("SELECTED PROJECT", content, width)
 }
 
 func (m Model) sdkLines(width int) []string {

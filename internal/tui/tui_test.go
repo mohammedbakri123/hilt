@@ -17,6 +17,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 type fakeCalls struct {
@@ -100,6 +101,9 @@ type fakeBackend struct {
 	availableErr        error
 	availableCalls      *[]bool
 	installStarted      chan struct{}
+	projectResult       projects.Result
+	projectErr          error
+	projectCalls        *int
 }
 
 func (f fakeBackend) Version() string          { return "test" }
@@ -278,6 +282,14 @@ func (f fakeBackend) RemoveRuntime(_ context.Context, version string) (install.R
 func (f fakeBackend) CheckRuntimeUpdates(context.Context) ([]install.Update, error) {
 	f.record("check-runtime-updates")
 	return f.runtimeUpdates, nil
+}
+
+func (f fakeBackend) ScanProjects(context.Context, string, bool) (projects.Result, error) {
+	f.record("scan-projects")
+	if f.projectCalls != nil {
+		*f.projectCalls++
+	}
+	return f.projectResult, f.projectErr
 }
 
 func (f fakeBackend) record(name string) {
@@ -1124,5 +1136,149 @@ func TestDashboardInstallShortcut(t *testing.T) {
 	model = press(t, model, key('i', "i"))
 	if model.screen != ScreenSDKs || model.sdkFocus != focusSDKs || model.prompt != promptInstallSDK {
 		t.Fatalf("dashboard i did not open the SDK install prompt: screen=%v focus=%v prompt=%v", model.screen, model.sdkFocus, model.prompt)
+	}
+}
+
+func projectFixture() projects.Result {
+	return projects.Result{
+		Root: "/work",
+		Workspaces: []projects.Workspace{{
+			Path:         "/work/Shop.sln",
+			Name:         "Shop",
+			Directory:    "/work",
+			Kind:         projects.KindSolution,
+			ProjectPaths: []string{"/work/src/Shop/Shop.csproj", "/work/tests/Shop.Tests/Shop.Tests.csproj"},
+		}},
+		Projects: []projects.Project{
+			{
+				Path:              "/work/src/Shop/Shop.csproj",
+				Name:              "Shop",
+				Directory:         "/work/src/Shop",
+				Kind:              projects.KindProject,
+				TargetFrameworks:  []string{"net10.0", "net9.0"},
+				SDK:               "Microsoft.NET.Sdk",
+				OutputType:        "Exe",
+				ProjectReferences: []string{"/work/src/Library/Library.csproj"},
+			},
+			{
+				Path:             "/work/tests/Shop.Tests/Shop.Tests.csproj",
+				Name:             "Shop.Tests",
+				Directory:        "/work/tests/Shop.Tests",
+				Kind:             projects.KindProject,
+				TargetFrameworks: []string{"net10.0"},
+				SDK:              "Microsoft.NET.Sdk",
+				TestProject:      true,
+			},
+		},
+		Warnings: []string{"broken.csproj: unexpected EOF"},
+	}
+}
+
+func openProjects(t *testing.T, backend fakeBackend, width, height int) Model {
+	t.Helper()
+	model := loadedModel(t, backend, width, height)
+	updated, command := model.Update(key('3', "3"))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("opening projects returned no scan command")
+	}
+	return apply(t, model, command())
+}
+
+func TestProjectsScreenScansAndShowsMetadata(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	if model.screen != ScreenProjects {
+		t.Fatalf("screen = %v, want projects", model.screen)
+	}
+	if !model.projectsLoaded || model.projectsLoading {
+		t.Errorf("loaded = %v loading = %v", model.projectsLoaded, model.projectsLoading)
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Projects & Solutions", "WORKSPACES", "Shop.sln", "PROJECTS", "Shop.Tests", "net10.0, net9.0", "[test]", "SELECTED PROJECT", "Microsoft.NET.Sdk", "WARNINGS", "broken.csproj"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("projects screen missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestProjectsSelectionSurvivesRefresh(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	model = press(t, model, key('j', "j"))
+	if selected, ok := model.selectedProject(); !ok || selected.Name != "Shop.Tests" {
+		t.Fatalf("selected = %+v", selected)
+	}
+
+	command := model.startProjectsScan()
+	if command == nil {
+		t.Fatal("refresh returned no command")
+	}
+	model = apply(t, model, command())
+	if model.projectCursor != 1 {
+		t.Errorf("cursor = %d, want 1", model.projectCursor)
+	}
+	selected, ok := model.selectedProject()
+	if !ok || selected.Name != "Shop.Tests" {
+		t.Errorf("selection after refresh = %+v", selected)
+	}
+}
+
+func TestProjectsCancelAndErrors(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+
+	command := model.startProjectsScan()
+	if command == nil || !model.projectsLoading {
+		t.Fatal("scan did not start")
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.projectsLoading {
+		t.Error("escape did not stop the scan")
+	}
+	if !strings.Contains(model.statusMessage, "cancelled") {
+		t.Errorf("status = %q", model.statusMessage)
+	}
+
+	model = apply(t, model, projectsMsg{request: model.projectRequest, err: context.Canceled})
+	if model.projectsErr != nil {
+		t.Errorf("cancel produced an error: %v", model.projectsErr)
+	}
+
+	model = apply(t, model, projectsMsg{request: model.projectRequest, err: errors.New("permission denied")})
+	if model.projectsErr == nil {
+		t.Fatal("expected a scan error")
+	}
+	plain := ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "Project scan failed") || !strings.Contains(plain, "permission denied") {
+		t.Errorf("error not rendered:\n%s", plain)
+	}
+}
+
+func TestProjectsSelectionClampsOnEmptyRefresh(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	model = press(t, model, key('j', "j"))
+	model = apply(t, model, projectsMsg{request: model.projectRequest, result: projects.Result{Root: "/work"}})
+	if model.projectCursor != 0 {
+		t.Errorf("cursor = %d, want 0", model.projectCursor)
+	}
+	if _, ok := model.selectedProject(); ok {
+		t.Error("empty result still reports a selection")
+	}
+}
+
+func TestProjectsFooterKeepsQuitHint(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 80, 24)
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+	footer := lines[len(lines)-1]
+	if !strings.Contains(footer, "r rescan") || !strings.Contains(footer, "q quit") {
+		t.Fatalf("projects footer missing actions: %q", footer)
 	}
 }
