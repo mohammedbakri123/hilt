@@ -174,6 +174,24 @@ func (a *App) CheckSDKUpdates(ctx context.Context) ([]install.Update, error) {
 	return a.installer().CheckUpdates(ctx)
 }
 
+// UpdateSDK applies a managed SDK update.
+func (a *App) UpdateSDK(ctx context.Context, version string, removeOld bool, progress io.Writer) (install.UpdateResult, error) {
+	result, err := a.installer().UpdateSDK(ctx, version, removeOld, progress)
+	if err != nil {
+		// Translate removal/ownership errors for the old version where relevant.
+		var notInstalled *install.NotInstalledError
+		var notOwned *install.NotOwnedError
+		if errors.As(err, &notInstalled) || errors.As(err, &notOwned) {
+			return result, a.removalError(ctx, install.ProductSDK, version, err)
+		}
+		return result, err
+	}
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+		a.locator.Ownership = manifest
+	}
+	return result, nil
+}
+
 // PlanRuntimeInstall resolves a managed runtime install without downloading it.
 // The version request may be exact or a channel/alias request.
 func (a *App) PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor, allowPrerelease bool) (install.RuntimePlan, error) {

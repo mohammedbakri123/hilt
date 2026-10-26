@@ -227,6 +227,82 @@ type Update struct {
 	UpdateAvailable bool   `json:"updateAvailable"`
 }
 
+// UpdateResult reports the outcome of applying a managed SDK update.
+type UpdateResult struct {
+	From            string   `json:"from"`
+	To              string   `json:"to"`
+	UpdateAvailable bool     `json:"updateAvailable"`
+	Installed       bool     `json:"installed"`
+	Result          Result   `json:"result,omitempty"`
+	Removal         *Removal `json:"removal,omitempty"`
+	OldRetained     bool     `json:"oldRetained"`
+}
+
+// UpdateSDK applies a managed SDK update: it resolves the newest stable version
+// in the same channel as the installed version, installs it without touching
+// the old one, and optionally removes the old version after success.
+func (i Installer) UpdateSDK(ctx context.Context, version string, removeOld bool, progress io.Writer) (UpdateResult, error) {
+	if progress == nil {
+		progress = io.Discard
+	}
+	parsed, err := ValidateVersion(version)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	canonical := parsed.String()
+	managedRoot, err := i.managedRoot()
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	manifest, err := Load(i.manifestPath(managedRoot), managedRoot)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	entry := manifest.Find(ProductSDK, canonical)
+	if entry == nil {
+		root := filepath.Join(managedRoot, canonical)
+		if _, statErr := os.Lstat(root); statErr == nil {
+			return UpdateResult{}, &NotOwnedError{Version: canonical, Root: root}
+		}
+		return UpdateResult{}, &NotInstalledError{Version: canonical}
+	}
+
+	client := i.metadata()
+	latest, err := client.LatestSDK(ctx, canonical)
+	if err != nil {
+		return UpdateResult{}, fmt.Errorf("resolve update for SDK %s: %w", canonical, err)
+	}
+	result := UpdateResult{From: canonical, To: latest.String(), UpdateAvailable: latest.Compare(parsed) > 0}
+	if !result.UpdateAvailable {
+		result.OldRetained = true
+		return result, nil
+	}
+
+	plan, err := i.Plan(ctx, latest.String(), false)
+	if err != nil {
+		return result, fmt.Errorf("plan SDK update %s -> %s: %w", canonical, latest.String(), err)
+	}
+	installResult, err := i.Install(ctx, plan, progress)
+	if err != nil {
+		return result, fmt.Errorf("install SDK %s: %w", latest.String(), err)
+	}
+	result.Installed = true
+	result.Result = installResult
+
+	if removeOld {
+		removal, removeErr := i.Remove(ctx, canonical)
+		if removeErr != nil {
+			result.OldRetained = true
+			return result, fmt.Errorf("remove old SDK %s after update: %w", canonical, removeErr)
+		}
+		result.Removal = &removal
+		result.OldRetained = false
+	} else {
+		result.OldRetained = true
+	}
+	return result, nil
+}
+
 // CheckUpdates checks manifest-owned SDKs for newer stable releases. It never
 // installs or modifies anything.
 func (i Installer) CheckUpdates(ctx context.Context) ([]Update, error) {
