@@ -145,7 +145,7 @@ func TestInstallerPlanInstallAndIdempotency(t *testing.T) {
 	runner := &fakeRunner{version: "10.0.100"}
 	installer := testInstaller(t, server, runner)
 
-	plan, err := installer.Plan(context.Background(), "10.0.100")
+	plan, err := installer.Plan(context.Background(), "10.0.100", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestInstallerPlanInstallAndIdempotency(t *testing.T) {
 	}
 
 	_, archiveRequests := server.requestCounts()
-	again, err := installer.Plan(context.Background(), "10.0.100")
+	again, err := installer.Plan(context.Background(), "10.0.100", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestInstallerInstallThenRemove(t *testing.T) {
 	defer server.Close()
 	installer := testInstaller(t, server, &fakeRunner{version: "10.0.100"})
 
-	plan, err := installer.Plan(context.Background(), "10.0.100")
+	plan, err := installer.Plan(context.Background(), "10.0.100", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestInstallerChecksumMismatchLeavesNoInstall(t *testing.T) {
 	defer server.Close()
 	installer := testInstaller(t, server, &fakeRunner{version: "10.0.100"})
 
-	plan, err := installer.Plan(context.Background(), "10.0.100")
+	plan, err := installer.Plan(context.Background(), "10.0.100", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestInstallerRefusesUnownedDestination(t *testing.T) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, err := installer.Plan(context.Background(), "10.0.100")
+	_, err := installer.Plan(context.Background(), "10.0.100", false)
 	var unowned *UnownedRootError
 	if !errors.As(err, &unowned) {
 		t.Fatalf("error = %v, want unowned root", err)
@@ -321,7 +321,7 @@ func TestInstallerStaleManifest(t *testing.T) {
 	if err := manifest.Save(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = installer.Plan(context.Background(), "10.0.100")
+	_, err = installer.Plan(context.Background(), "10.0.100", false)
 	var stale *StaleInstallError
 	if !errors.As(err, &stale) {
 		t.Fatalf("error = %v, want stale install", err)
@@ -337,7 +337,7 @@ func TestInstallerRejectsUnsafeArchive(t *testing.T) {
 	server := newInstallServer(t, "10.0.100", "linux-x64", archive, "")
 	defer server.Close()
 	installer := testInstaller(t, server, &fakeRunner{version: "10.0.100"})
-	plan, err := installer.Plan(context.Background(), "10.0.100")
+	plan, err := installer.Plan(context.Background(), "10.0.100", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestInstallerEnforcesDownloadLimit(t *testing.T) {
 	defer server.Close()
 	installer := testInstaller(t, server, &fakeRunner{version: "10.0.100"})
 	installer.MaxDownloadBytes = 16
-	plan, err := installer.Plan(context.Background(), "10.0.100")
+	plan, err := installer.Plan(context.Background(), "10.0.100", false)
 	if err != nil {
 		t.Fatal(err)
 	}

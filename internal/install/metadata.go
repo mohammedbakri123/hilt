@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
@@ -32,11 +33,16 @@ type Artifact struct {
 	SHA512   []byte
 }
 
-// ReleaseClient fetches Microsoft release metadata.
+// ReleaseClient fetches Microsoft release metadata. Fetched channel metadata
+// and the release index are cached per client.
 type ReleaseClient struct {
 	BaseURL     string
 	HTTPClient  *http.Client
 	ValidateURL func(*url.URL) error
+
+	cacheMu      sync.Mutex
+	channels     map[string]releaseMetadata
+	releaseIndex *releaseIndex
 }
 
 type releaseMetadata struct {
@@ -44,11 +50,13 @@ type releaseMetadata struct {
 }
 
 type release struct {
-	ReleaseVersion    string       `json:"release-version"`
-	Runtime           *sdkRelease  `json:"runtime"`
-	ASPNETCoreRuntime *sdkRelease  `json:"aspnetcore-runtime"`
-	SDK               *sdkRelease  `json:"sdk"`
-	SDKs              []sdkRelease `json:"sdks"`
+	ReleaseVersion     string       `json:"release-version"`
+	SDK                *sdkRelease  `json:"sdk"`
+	SDKs               []sdkRelease `json:"sdks"`
+	Runtime            *sdkRelease  `json:"runtime"`
+	Runtimes           []sdkRelease `json:"runtimes"`
+	ASPNETCoreRuntime  *sdkRelease  `json:"aspnetcore-runtime"`
+	ASPNETCoreRuntimes []sdkRelease `json:"aspnetcore-runtimes"`
 }
 
 type sdkRelease struct {
@@ -136,8 +144,10 @@ func (e *ChecksumMismatchError) Error() string {
 func (e *ChecksumMismatchError) Unwrap() error { return ErrChecksumMismatch }
 
 // ResolveSDK returns the archive metadata for an exact SDK version and RID.
+// Prerelease versions are accepted here; callers gate prerelease installs on
+// the --prerelease flag.
 func (c *ReleaseClient) ResolveSDK(ctx context.Context, version, rid string) (Artifact, error) {
-	parsed, err := ValidateVersion(version)
+	parsed, err := dotnet.ParseVersion(version)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -204,9 +214,10 @@ func (c *ReleaseClient) LatestSDK(ctx context.Context, version string) (dotnet.V
 
 // ResolveRuntime returns the archive metadata for an exact runtime version,
 // archive product, and RID. Product is RuntimeArchiveRuntime or
-// RuntimeArchiveASPNETCore.
+// RuntimeArchiveASPNETCore. Prerelease versions are accepted here; callers
+// gate prerelease installs on the --prerelease flag.
 func (c *ReleaseClient) ResolveRuntime(ctx context.Context, version, product, rid string) (Artifact, error) {
-	parsed, err := ValidateVersion(version)
+	parsed, err := dotnet.ParseVersion(version)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -279,7 +290,32 @@ func (c *ReleaseClient) LatestRuntime(ctx context.Context, version, product stri
 }
 
 func (c *ReleaseClient) channelMetadata(ctx context.Context, version dotnet.Version) (releaseMetadata, error) {
-	channel := Channel(version)
+	return c.channel(ctx, Channel(version))
+}
+
+// channel fetches (or returns the cached) release metadata for a channel.
+func (c *ReleaseClient) channel(ctx context.Context, channel string) (releaseMetadata, error) {
+	if channel == "" {
+		return releaseMetadata{}, errors.New("release channel is empty")
+	}
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	if c.channels != nil {
+		if metadata, ok := c.channels[channel]; ok {
+			return metadata, nil
+		}
+	} else {
+		c.channels = make(map[string]releaseMetadata)
+	}
+	metadata, err := c.fetchChannel(ctx, channel)
+	if err != nil {
+		return releaseMetadata{}, err
+	}
+	c.channels[channel] = metadata
+	return metadata, nil
+}
+
+func (c *ReleaseClient) fetchChannel(ctx context.Context, channel string) (releaseMetadata, error) {
 	baseURL := strings.TrimRight(c.BaseURL, "/")
 	if baseURL == "" {
 		baseURL = defaultMetadataBaseURL
@@ -307,6 +343,105 @@ func (c *ReleaseClient) channelMetadata(ctx context.Context, version dotnet.Vers
 	return metadata, nil
 }
 
+// releaseIndex caches the cross-channel release index.
+func (c *ReleaseClient) index(ctx context.Context) (releaseIndex, error) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	if c.releaseIndex != nil {
+		return *c.releaseIndex, nil
+	}
+	baseURL := strings.TrimRight(c.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = defaultMetadataBaseURL
+	}
+	indexURL := baseURL + "/releases-index.json"
+	parsedURL, err := url.Parse(indexURL)
+	if err != nil {
+		return releaseIndex{}, fmt.Errorf("parse release index URL: %w", err)
+	}
+	if err := c.validator()(parsedURL); err != nil {
+		return releaseIndex{}, err
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	data, err := c.fetch(fetchCtx, parsedURL, maxMetadataBytes)
+	if err != nil {
+		return releaseIndex{}, fmt.Errorf("fetch release index: %w", err)
+	}
+	var parsed releaseIndex
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return releaseIndex{}, fmt.Errorf("parse release index: %w", err)
+	}
+	if len(parsed.Channels) == 0 {
+		return releaseIndex{}, fmt.Errorf("parse release index: no channels were found")
+	}
+	c.releaseIndex = &parsed
+	return parsed, nil
+}
+
+// productReleases returns the singular and plural metadata entries carrying
+// versions for a product.
+func (r release) productReleases(product string) []sdkRelease {
+	var entries []sdkRelease
+	switch product {
+	case "sdk":
+		entries = append(entries, r.SDKs...)
+		if r.SDK != nil {
+			entries = append(entries, *r.SDK)
+		}
+	case RuntimeArchiveRuntime:
+		entries = append(entries, r.Runtimes...)
+		if r.Runtime != nil {
+			entries = append(entries, *r.Runtime)
+		}
+	case RuntimeArchiveASPNETCore:
+		entries = append(entries, r.ASPNETCoreRuntimes...)
+		if r.ASPNETCoreRuntime != nil {
+			entries = append(entries, *r.ASPNETCoreRuntime)
+		}
+	default:
+		return nil
+	}
+	return entries
+}
+
+// latestSDKVersion returns the newest version in the channel for the SDK. When
+// allowPrerelease is set, entries from the plural sdks array also compete.
+func (m releaseMetadata) latestSDKVersion(reference dotnet.Version, allowPrerelease bool) (dotnet.Version, bool) {
+	return latestVersionInChannel(m, "sdk", reference, allowPrerelease)
+}
+
+// latestRuntimeVersion returns the newest version in the channel for a runtime
+// archive product. When allowPrerelease is set, plural entries also compete.
+func (m releaseMetadata) latestRuntimeVersion(product string, reference dotnet.Version, allowPrerelease bool) (dotnet.Version, bool) {
+	return latestVersionInChannel(m, product, reference, allowPrerelease)
+}
+
+func latestVersionInChannel(metadata releaseMetadata, product string, reference dotnet.Version, allowPrerelease bool) (dotnet.Version, bool) {
+	var latest dotnet.Version
+	found := false
+	add := func(version string) {
+		parsed, err := dotnet.ParseVersion(version)
+		if err != nil || parsed.Major != reference.Major || parsed.Minor != reference.Minor {
+			return
+		}
+		if !allowPrerelease && parsed.IsPrerelease() {
+			return
+		}
+		if !found || parsed.Compare(latest) > 0 {
+			latest = parsed
+			found = true
+		}
+	}
+	for _, release := range metadata.Releases {
+		for _, entry := range release.productReleases(product) {
+			add(entry.Version)
+		}
+	}
+	return latest, found
+}
+
 func (m releaseMetadata) latestSDK(reference dotnet.Version) (dotnet.Version, bool) {
 	var latest dotnet.Version
 	found := false
@@ -332,18 +467,29 @@ func (m releaseMetadata) latestSDK(reference dotnet.Version) (dotnet.Version, bo
 }
 
 func (m releaseMetadata) findSDK(version string) *sdkRelease {
+	var fallback *sdkRelease
 	for index := range m.Releases {
 		current := &m.Releases[index]
 		if current.SDK != nil && current.SDK.Version == version {
-			return current.SDK
+			if len(current.SDK.Files) > 0 {
+				return current.SDK
+			}
+			if fallback == nil {
+				fallback = current.SDK
+			}
 		}
 		for sdkIndex := range current.SDKs {
 			if current.SDKs[sdkIndex].Version == version {
-				return &current.SDKs[sdkIndex]
+				if len(current.SDKs[sdkIndex].Files) > 0 {
+					return &current.SDKs[sdkIndex]
+				}
+				if fallback == nil {
+					fallback = &current.SDKs[sdkIndex]
+				}
 			}
 		}
 	}
-	return nil
+	return fallback
 }
 
 // productRelease returns the release entry for a runtime archive product. An
@@ -360,14 +506,49 @@ func (r release) productRelease(product string) *sdkRelease {
 }
 
 func (m releaseMetadata) findRuntimeProduct(product, version string) *sdkRelease {
+	var fallback *sdkRelease
 	for index := range m.Releases {
 		current := &m.Releases[index]
 		entry := current.productRelease(product)
 		if entry != nil && entry.Version == version {
-			return entry
+			if len(entry.Files) > 0 {
+				return entry
+			}
+			if fallback == nil {
+				fallback = entry
+			}
+		}
+		for _, plural := range current.productPluralPointers(product) {
+			if plural.Version == version {
+				if len(plural.Files) > 0 {
+					return plural
+				}
+				if fallback == nil {
+					fallback = plural
+				}
+			}
 		}
 	}
-	return nil
+	return fallback
+}
+
+// productPluralPointers returns pointers to the plural array entries for a
+// runtime archive product.
+func (r release) productPluralPointers(product string) []*sdkRelease {
+	var collection []sdkRelease
+	switch product {
+	case RuntimeArchiveRuntime:
+		collection = r.Runtimes
+	case RuntimeArchiveASPNETCore:
+		collection = r.ASPNETCoreRuntimes
+	default:
+		return nil
+	}
+	entries := make([]*sdkRelease, 0, len(collection))
+	for index := range collection {
+		entries = append(entries, &collection[index])
+	}
+	return entries
 }
 
 func (m releaseMetadata) latestRuntime(product string, reference dotnet.Version) (dotnet.Version, bool) {

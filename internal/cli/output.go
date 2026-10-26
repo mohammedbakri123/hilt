@@ -161,6 +161,9 @@ func printInstallPlan(writer io.Writer, plan install.Plan) {
 	} else {
 		fmt.Fprintln(writer, "Managed .NET SDK installation")
 	}
+	if plan.Requested != "" && !strings.EqualFold(plan.Requested, plan.Version) {
+		fmt.Fprintf(writer, "  Requested    %s (resolved to %s)\n", plan.Requested, plan.Version)
+	}
 	fmt.Fprintf(writer, "  SDK          %s\n", plan.Version)
 	fmt.Fprintf(writer, "  RID          %s\n", plan.RID)
 	fmt.Fprintf(writer, "  Destination  %s\n", plan.Root)
@@ -201,6 +204,9 @@ func printRuntimeInstallPlan(writer io.Writer, plan install.RuntimePlan) {
 		fmt.Fprintln(writer, "Managed .NET runtime already installed")
 	} else {
 		fmt.Fprintln(writer, "Managed .NET runtime installation")
+	}
+	if plan.Requested != "" && !strings.EqualFold(plan.Requested, plan.Version) {
+		fmt.Fprintf(writer, "  Requested    %s (resolved to %s)\n", plan.Requested, plan.Version)
 	}
 	fmt.Fprintf(writer, "  Version      %s\n", plan.Version)
 	fmt.Fprintf(writer, "  RID          %s\n", plan.RID)

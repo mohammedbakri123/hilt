@@ -86,6 +86,7 @@ type RuntimeArtifact struct {
 // RuntimePlan describes a runtime installation before any download occurs.
 type RuntimePlan struct {
 	Version          string            `json:"version"`
+	Requested        string            `json:"requested,omitempty"`
 	RID              string            `json:"rid"`
 	Framework        string            `json:"framework"`
 	Frameworks       []string          `json:"frameworks"`
@@ -118,13 +119,30 @@ func RuntimeRoot(managedRoot, version string) string {
 }
 
 // PlanRuntime resolves metadata and checks for an existing runtime installation.
-func (i Installer) PlanRuntime(ctx context.Context, version string, flavor FrameworkFlavor) (RuntimePlan, error) {
+// The version request may be exact or a channel/alias request; aliases and
+// channels are resolved to an exact version before anything else happens.
+func (i Installer) PlanRuntime(ctx context.Context, input string, flavor FrameworkFlavor, allowPrerelease bool) (RuntimePlan, error) {
 	if !flavor.Valid() {
 		return RuntimePlan{}, fmt.Errorf("invalid framework %q: expected all, netcore, or aspnetcore", flavor)
 	}
-	parsed, err := ValidateVersion(version)
+	request, err := ParseVersionRequest(input, allowPrerelease)
 	if err != nil {
 		return RuntimePlan{}, err
+	}
+	resolved, err := i.metadata().ResolveRuntimeVersion(ctx, request, flavor.archiveProduct())
+	if err != nil {
+		return RuntimePlan{}, err
+	}
+	return i.planRuntimeVersion(ctx, resolved.String(), request.Requested, flavor, request.AllowPrerelease)
+}
+
+func (i Installer) planRuntimeVersion(ctx context.Context, canonical, requested string, flavor FrameworkFlavor, allowPrerelease bool) (RuntimePlan, error) {
+	parsed, err := dotnet.ParseVersion(canonical)
+	if err != nil {
+		return RuntimePlan{}, err
+	}
+	if parsed.IsPrerelease() && !allowPrerelease {
+		return RuntimePlan{}, fmt.Errorf("prerelease version %q is not supported without --prerelease", canonical)
 	}
 	rid, err := CurrentRID()
 	if err != nil {
@@ -139,14 +157,15 @@ func (i Installer) PlanRuntime(ctx context.Context, version string, flavor Frame
 		return RuntimePlan{}, err
 	}
 
-	canonical := parsed.String()
 	root := RuntimeRoot(managedRoot, canonical)
 	if entry := manifest.Find(ProductRuntime, canonical); entry != nil {
 		info, statErr := os.Stat(root)
 		if statErr != nil || !info.IsDir() || !usableRuntimeRoot(root, canonical, entry.Frameworks) {
 			return RuntimePlan{}, &StaleInstallError{Product: ProductRuntime, Version: canonical, Root: root}
 		}
-		return runtimePlanFromEntry(*entry, root, true), nil
+		plan := runtimePlanFromEntry(*entry, root, true)
+		plan.Requested = requested
+		return plan, nil
 	}
 
 	if info, statErr := os.Lstat(root); statErr == nil {
@@ -164,6 +183,7 @@ func (i Installer) PlanRuntime(ctx context.Context, version string, flavor Frame
 	}
 	return RuntimePlan{
 		Version:    canonical,
+		Requested:  requested,
 		RID:        rid,
 		Framework:  string(flavor),
 		Frameworks: flavor.targetFrameworks(),

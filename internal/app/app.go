@@ -126,9 +126,10 @@ func (a *App) Inventory(ctx context.Context) (dotnet.Inventory, error) {
 	return dotnet.Discover(ctx, a.locator, a.prober, os.Stat), nil
 }
 
-// PlanSDKInstall resolves a managed SDK install without downloading it.
-func (a *App) PlanSDKInstall(ctx context.Context, version string) (install.Plan, error) {
-	plan, err := a.installer().Plan(ctx, version)
+// PlanSDKInstall resolves a managed SDK install without downloading it. The
+// version request may be exact or a channel/alias request.
+func (a *App) PlanSDKInstall(ctx context.Context, version string, allowPrerelease bool) (install.Plan, error) {
+	plan, err := a.installer().Plan(ctx, version, allowPrerelease)
 	if err != nil {
 		return install.Plan{}, err
 	}
@@ -174,8 +175,9 @@ func (a *App) CheckSDKUpdates(ctx context.Context) ([]install.Update, error) {
 }
 
 // PlanRuntimeInstall resolves a managed runtime install without downloading it.
-func (a *App) PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor) (install.RuntimePlan, error) {
-	plan, err := a.installer().PlanRuntime(ctx, version, framework)
+// The version request may be exact or a channel/alias request.
+func (a *App) PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor, allowPrerelease bool) (install.RuntimePlan, error) {
+	plan, err := a.installer().PlanRuntime(ctx, version, framework, allowPrerelease)
 	if err != nil {
 		return install.RuntimePlan{}, err
 	}

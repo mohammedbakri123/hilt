@@ -212,7 +212,7 @@ func TestRuntimePlanAndInstallNetCore(t *testing.T) {
 	defer server.Close()
 	installer := runtimeTestInstaller(t, server.Server, netcoreRunner())
 
-	plan, err := installer.PlanRuntime(context.Background(), "10.0.12", FrameworkNetCore)
+	plan, err := installer.PlanRuntime(context.Background(), "10.0.12", FrameworkNetCore, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestRuntimePlanAndInstallNetCore(t *testing.T) {
 
 	// Idempotency: re-plan and re-install without downloading again.
 	before := server.archiveRequestCount("/archives/netcore.tar.gz")
-	again, err := installer.PlanRuntime(context.Background(), "10.0.12", FrameworkNetCore)
+	again, err := installer.PlanRuntime(context.Background(), "10.0.12", FrameworkNetCore, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestRuntimeInstallASPNETCoreVerifiesBothFrameworks(t *testing.T) {
 	installer := runtimeTestInstaller(t, server.Server, runner)
 
 	for _, flavor := range []FrameworkFlavor{FrameworkASPNETCore, FrameworkAll} {
-		plan, err := installer.PlanRuntime(context.Background(), "10.0.12", flavor)
+		plan, err := installer.PlanRuntime(context.Background(), "10.0.12", flavor, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -511,7 +511,7 @@ func TestRuntimeFallbackHostUsedWhenStagingLacksDotnet(t *testing.T) {
 		return "/usr/bin/known-host", true
 	}
 
-	plan, err := installer.PlanRuntime(context.Background(), "10.0.12", FrameworkNetCore)
+	plan, err := installer.PlanRuntime(context.Background(), "10.0.12", FrameworkNetCore, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ func TestRuntimeVerifyFailsWithoutAnyHost(t *testing.T) {
 		return "", false
 	}
 
-	plan, err := installer.PlanRuntime(context.Background(), "10.0.12", FrameworkNetCore)
+	plan, err := installer.PlanRuntime(context.Background(), "10.0.12", FrameworkNetCore, false)
 	if err != nil {
 		t.Fatal(err)
 	}

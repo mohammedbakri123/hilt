@@ -31,6 +31,7 @@ const (
 // Plan describes an SDK installation before any download occurs.
 type Plan struct {
 	Version          string `json:"version"`
+	Requested        string `json:"requested,omitempty"`
 	RID              string `json:"rid"`
 	Root             string `json:"root"`
 	DotnetPath       string `json:"dotnetPath"`
@@ -143,11 +144,28 @@ func (i Installer) host() (string, bool) {
 	return "", false
 }
 
-// Plan resolves metadata and checks for an existing installation.
-func (i Installer) Plan(ctx context.Context, version string) (Plan, error) {
-	parsed, err := ValidateVersion(version)
+// Plan resolves metadata and checks for an existing installation. The version
+// request may be exact or a channel/alias request; aliases and channels are
+// resolved to an exact version before anything else happens.
+func (i Installer) Plan(ctx context.Context, input string, allowPrerelease bool) (Plan, error) {
+	request, err := ParseVersionRequest(input, allowPrerelease)
 	if err != nil {
 		return Plan{}, err
+	}
+	resolved, err := i.metadata().ResolveVersion(ctx, request)
+	if err != nil {
+		return Plan{}, err
+	}
+	return i.planVersion(ctx, resolved.String(), request.Requested, request.AllowPrerelease)
+}
+
+func (i Installer) planVersion(ctx context.Context, canonical, requested string, allowPrerelease bool) (Plan, error) {
+	parsed, err := dotnet.ParseVersion(canonical)
+	if err != nil {
+		return Plan{}, err
+	}
+	if parsed.IsPrerelease() && !allowPrerelease {
+		return Plan{}, fmt.Errorf("prerelease version %q is not supported without --prerelease", canonical)
 	}
 	rid, err := CurrentRID()
 	if err != nil {
@@ -162,14 +180,15 @@ func (i Installer) Plan(ctx context.Context, version string) (Plan, error) {
 		return Plan{}, err
 	}
 
-	canonical := parsed.String()
 	if entry := manifest.Find(ProductSDK, canonical); entry != nil {
 		root := manifest.RootFor(*entry)
 		info, statErr := os.Stat(root)
 		if statErr != nil || !info.IsDir() || !usableRoot(root, canonical) {
 			return Plan{}, &StaleInstallError{Version: canonical, Root: root}
 		}
-		return planFromEntry(*entry, root, true), nil
+		plan := planFromEntry(*entry, root, true)
+		plan.Requested = requested
+		return plan, nil
 	}
 
 	root := filepath.Join(managedRoot, canonical)
@@ -194,6 +213,7 @@ func (i Installer) Plan(ctx context.Context, version string) (Plan, error) {
 		SourceURL:  artifact.URL,
 		SHA512:     FormatSHA512(artifact.SHA512),
 		FileName:   artifact.FileName,
+		Requested:  requested,
 	}, nil
 }
 

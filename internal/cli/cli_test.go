@@ -55,7 +55,7 @@ func (f fakeBackend) Inventory(context.Context) (dotnet.Inventory, error) {
 func (f fakeBackend) Resolve(context.Context, dotnet.Inventory) (dotnet.Selection, error) {
 	return f.selection, f.selectionErr
 }
-func (f fakeBackend) PlanSDKInstall(context.Context, string) (install.Plan, error) {
+func (f fakeBackend) PlanSDKInstall(context.Context, string, bool) (install.Plan, error) {
 	return f.plan, f.planErr
 }
 func (f fakeBackend) InstallSDK(_ context.Context, _ install.Plan, progress io.Writer) (install.Result, error) {
@@ -70,7 +70,7 @@ func (f fakeBackend) RemoveSDK(context.Context, string) (install.Removal, error)
 func (f fakeBackend) CheckSDKUpdates(context.Context) ([]install.Update, error) {
 	return f.updates, f.updatesErr
 }
-func (f fakeBackend) PlanRuntimeInstall(_ context.Context, _ string, framework install.FrameworkFlavor) (install.RuntimePlan, error) {
+func (f fakeBackend) PlanRuntimeInstall(_ context.Context, _ string, framework install.FrameworkFlavor, _ bool) (install.RuntimePlan, error) {
 	if f.runtimePlan.Framework == "" {
 		f.runtimePlan.Framework = string(framework)
 	}
@@ -367,8 +367,8 @@ func TestSDKInstallAlreadyInstalled(t *testing.T) {
 }
 
 func TestSDKInstallErrors(t *testing.T) {
-	invalid := run(t, []string{"sdk", "install", "latest"}, populatedBackend(), false, nil)
-	if invalid.code != 2 || !strings.Contains(invalid.stderr, "invalid SDK version") {
+	invalid := run(t, []string{"sdk", "install", "nonsense"}, populatedBackend(), false, nil)
+	if invalid.code != 2 || !strings.Contains(invalid.stderr, "invalid version request") {
 		t.Errorf("invalid version = %d %q", invalid.code, invalid.stderr)
 	}
 
@@ -862,8 +862,8 @@ func TestRuntimeInstallAlreadyInstalled(t *testing.T) {
 }
 
 func TestRuntimeInstallErrors(t *testing.T) {
-	invalidVersion := run(t, []string{"runtime", "install", "latest"}, populatedBackend(), false, nil)
-	if invalidVersion.code != 2 || !strings.Contains(invalidVersion.stderr, "invalid SDK version") {
+	invalidVersion := run(t, []string{"runtime", "install", "nonsense"}, populatedBackend(), false, nil)
+	if invalidVersion.code != 2 || !strings.Contains(invalidVersion.stderr, "invalid version request") {
 		t.Errorf("invalid version = %d %q", invalidVersion.code, invalidVersion.stderr)
 	}
 
@@ -1006,5 +1006,110 @@ func TestRuntimeOutdatedErrors(t *testing.T) {
 	result := run(t, []string{"runtime", "outdated"}, backend, false, nil)
 	if result.code != 1 || !strings.Contains(result.stderr, "runtime metadata unavailable") {
 		t.Errorf("result = %d %q", result.code, result.stderr)
+	}
+}
+
+func TestSDKInstallAliasResolvesBeforeDownload(t *testing.T) {
+	backend := populatedBackend()
+	backend.plan = install.Plan{
+		Version:    "10.0.112",
+		Requested:  "latest",
+		RID:        "linux-x64",
+		Root:       "/managed/10.0.112",
+		DotnetPath: "/managed/10.0.112/dotnet",
+	}
+	backend.installResult = install.Result{Version: "10.0.112", RID: "linux-x64", Root: backend.plan.Root, InstalledAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}
+	result := run(t, []string{"sdk", "install", "latest"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Requested    latest (resolved to 10.0.112)", "SDK          10.0.112"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestRuntimeInstallAliasResolvesBeforeDownload(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimePlan = install.RuntimePlan{
+		Version:    "10.0.14",
+		Requested:  "lts",
+		RID:        "linux-x64",
+		Framework:  "netcore",
+		Frameworks: []string{"Microsoft.NETCore.App"},
+		Root:       "/managed/runtimes/10.0.14",
+	}
+	backend.runtimeResult = install.RuntimeResult{Version: "10.0.14", RID: "linux-x64", Framework: "netcore", Frameworks: backend.runtimePlan.Frameworks, Root: backend.runtimePlan.Root, InstalledAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC), VerifiedWith: backend.runtimePlan.Root + "/dotnet"}
+	result := run(t, []string{"runtime", "install", "lts", "--framework", "netcore"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Requested    lts (resolved to 10.0.14)", "Version      10.0.14"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestSDKInstallPrereleaseFlag(t *testing.T) {
+	backend := populatedBackend()
+	backend.plan = install.Plan{
+		Version:    "10.1.0-rc.1",
+		Requested:  "10.1.0-rc.1",
+		RID:        "linux-x64",
+		Root:       "/managed/10.1.0-rc.1",
+		DotnetPath: "/managed/10.1.0-rc.1/dotnet",
+	}
+	backend.installResult = install.Result{Version: "10.1.0-rc.1", RID: "linux-x64", Root: backend.plan.Root, InstalledAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}
+
+	without := run(t, []string{"sdk", "install", "10.1.0-rc.1"}, backend, false, nil)
+	if without.code != 2 || !strings.Contains(without.stderr, "--prerelease") {
+		t.Errorf("prerelease without flag = %d %q", without.code, without.stderr)
+	}
+
+	with := run(t, []string{"sdk", "install", "10.1.0-rc.1", "--prerelease"}, backend, false, nil)
+	if with.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", with.code, with.stderr)
+	}
+	if !strings.Contains(with.stdout, "10.1.0-rc.1") {
+		t.Errorf("expected prerelease version in output: %q", with.stdout)
+	}
+}
+
+func TestRuntimeInstallPrereleaseFlag(t *testing.T) {
+	backend := populatedBackend()
+	backend.runtimePlan = install.RuntimePlan{
+		Version:    "10.0.15-rc.2",
+		Requested:  "10.0",
+		RID:        "linux-x64",
+		Framework:  "all",
+		Frameworks: []string{"Microsoft.AspNetCore.App", "Microsoft.NETCore.App"},
+		Root:       "/managed/runtimes/10.0.15-rc.2",
+	}
+	backend.runtimeResult = install.RuntimeResult{Version: "10.0.15-rc.2", RID: "linux-x64", Framework: "all", Frameworks: backend.runtimePlan.Frameworks, Root: backend.runtimePlan.Root, InstalledAt: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC), VerifiedWith: backend.runtimePlan.Root + "/dotnet"}
+
+	without := run(t, []string{"runtime", "install", "10.0.15-rc.2"}, backend, false, nil)
+	if without.code != 2 || !strings.Contains(without.stderr, "--prerelease") {
+		t.Errorf("prerelease without flag = %d %q", without.code, without.stderr)
+	}
+
+	with := run(t, []string{"runtime", "install", "10.0.15-rc.2", "--prerelease"}, backend, false, nil)
+	if with.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", with.code, with.stderr)
+	}
+	if !strings.Contains(with.stdout, "10.0.15-rc.2") {
+		t.Errorf("expected resolved prerelease in output: %q", with.stdout)
+	}
+}
+
+func TestAliasWithPrereleaseFlagIsRejected(t *testing.T) {
+	result := run(t, []string{"sdk", "install", "latest", "--prerelease"}, populatedBackend(), false, nil)
+	if result.code != 2 || !strings.Contains(result.stderr, "not supported with the latest alias") {
+		t.Errorf("result = %d %q", result.code, result.stderr)
+	}
+	lts := run(t, []string{"runtime", "install", "lts", "--prerelease"}, populatedBackend(), false, nil)
+	if lts.code != 2 || !strings.Contains(lts.stderr, "not supported with the lts alias") {
+		t.Errorf("result = %d %q", lts.code, lts.stderr)
 	}
 }

@@ -27,11 +27,11 @@ type Backend interface {
 	PackageManager() *platform.PackageManager
 	Inventory(ctx context.Context) (dotnet.Inventory, error)
 	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
-	PlanSDKInstall(ctx context.Context, version string) (install.Plan, error)
+	PlanSDKInstall(ctx context.Context, version string, allowPrerelease bool) (install.Plan, error)
 	InstallSDK(ctx context.Context, plan install.Plan, progress io.Writer) (install.Result, error)
 	RemoveSDK(ctx context.Context, version string) (install.Removal, error)
 	CheckSDKUpdates(ctx context.Context) ([]install.Update, error)
-	PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor) (install.RuntimePlan, error)
+	PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor, allowPrerelease bool) (install.RuntimePlan, error)
 	InstallRuntime(ctx context.Context, plan install.RuntimePlan, progress io.Writer) (install.RuntimeResult, error)
 	RemoveRuntime(ctx context.Context, version string) (install.Removal, error)
 	CheckRuntimeUpdates(ctx context.Context) ([]install.Update, error)
@@ -275,6 +275,7 @@ func newSDKCommand(options Options) *cobra.Command {
 
 func newSDKInstallCommand(options Options) *cobra.Command {
 	var asJSON bool
+	var allowPrerelease bool
 	command := &cobra.Command{
 		Use:   "install <version>",
 		Short: "Install a managed .NET SDK",
@@ -283,10 +284,10 @@ func newSDKInstallCommand(options Options) *cobra.Command {
 			if err := cmd.Context().Err(); err != nil {
 				return &exitError{code: 130, err: err}
 			}
-			if _, err := install.ValidateVersion(args[0]); err != nil {
+			if _, err := install.ParseVersionRequest(args[0], allowPrerelease); err != nil {
 				return usageError(err.Error())
 			}
-			plan, err := options.Backend.PlanSDKInstall(cmd.Context(), args[0])
+			plan, err := options.Backend.PlanSDKInstall(cmd.Context(), args[0], allowPrerelease)
 			if err != nil {
 				if cmd.Context().Err() != nil {
 					return &exitError{code: 130, err: err}
@@ -321,6 +322,7 @@ func newSDKInstallCommand(options Options) *cobra.Command {
 		},
 	}
 	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
+	command.Flags().BoolVar(&allowPrerelease, "prerelease", false, "allow exact or channel prerelease versions")
 	return command
 }
 
@@ -411,6 +413,7 @@ func newRuntimeCommand(options Options) *cobra.Command {
 func newRuntimeInstallCommand(options Options) *cobra.Command {
 	var asJSON bool
 	var framework string
+	var allowPrerelease bool
 	command := &cobra.Command{
 		Use:   "install <version>",
 		Short: "Install a managed .NET runtime",
@@ -419,14 +422,14 @@ func newRuntimeInstallCommand(options Options) *cobra.Command {
 			if err := cmd.Context().Err(); err != nil {
 				return &exitError{code: 130, err: err}
 			}
-			if _, err := install.ValidateVersion(args[0]); err != nil {
+			if _, err := install.ParseVersionRequest(args[0], allowPrerelease); err != nil {
 				return usageError(err.Error())
 			}
 			flavor := install.FrameworkFlavor(strings.TrimSpace(framework))
 			if !flavor.Valid() {
 				return usageError(fmt.Sprintf("invalid framework %q: expected all, netcore, or aspnetcore", framework))
 			}
-			plan, err := options.Backend.PlanRuntimeInstall(cmd.Context(), args[0], flavor)
+			plan, err := options.Backend.PlanRuntimeInstall(cmd.Context(), args[0], flavor, allowPrerelease)
 			if err != nil {
 				if cmd.Context().Err() != nil {
 					return &exitError{code: 130, err: err}
@@ -462,6 +465,7 @@ func newRuntimeInstallCommand(options Options) *cobra.Command {
 	}
 	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
 	command.Flags().StringVar(&framework, "framework", string(install.FrameworkAll), "runtime framework flavor: all, netcore, or aspnetcore")
+	command.Flags().BoolVar(&allowPrerelease, "prerelease", false, "allow exact or channel prerelease versions")
 	return command
 }
 
