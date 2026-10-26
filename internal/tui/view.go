@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
-	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/install"
 )
 
 // View renders the whole application.
@@ -143,7 +143,7 @@ func (m Model) renderFooter(width int) string {
 		keys = " ↑/↓ navigate · r re-run · pgup/pgdn scroll · d doctor · ? help · q quit"
 	}
 	if m.screen == ScreenSDKs {
-		keys = " ↑/↓ navigate · r refresh · pgup/pgdn scroll · ? help · q quit"
+		keys = " tab switch list · ↑/↓ select · i install · x remove · u updates · r refresh · ? help · q quit"
 	}
 	return fitLine(styleMuted.Render(keys), width)
 }
@@ -154,13 +154,17 @@ func (m Model) renderHelp(width, height int) string {
 		"",
 		"↑/↓  j/k      previous / next section",
 		"1-8           jump to a section",
-		"tab           cycle sections",
-		"enter         open selected section",
+		"tab           switch SDK/runtime list, else cycle sections",
+		"enter         open selected section / confirm prompt",
+		"i             install the focused product",
+		"x             remove the selected owned item",
+		"u             check updates / apply the selected update",
+		"esc           close prompt or cancel an operation",
 		"r             refresh inventory",
 		"d             run diagnostics",
 		"pgup/pgdn     scroll content",
 		"ctrl+u/ctrl+d page scrolling",
-		"?  esc        close help",
+		"?             close help",
 		"q  ctrl+c     quit Hilt",
 	}
 	box := styleHelpBox.Render(strings.Join(content, "\n"))
@@ -279,7 +283,7 @@ func (m Model) dashboardLines(width int) []string {
 
 	if !inventory.HasUsableHost() && len(inventory.SDKs) == 0 {
 		lines = append(lines, "", styleWarning.Render(
-			"No .NET SDK detected. Hilt remains fully usable; install a managed SDK with hilt sdk install."))
+			"No .NET SDK detected. Hilt remains fully usable; press i or run hilt sdk install."))
 	}
 
 	warnings := m.warnings()
@@ -294,6 +298,8 @@ func (m Model) dashboardLines(width int) []string {
 
 func (m Model) sdkLines(width int) []string {
 	lines := sectionHeader("SDKs & Runtimes", width)
+	lines = append(lines, m.managementLines(width)...)
+
 	if m.loadingInventory && m.inventory == nil {
 		return append(lines, m.spinner.View()+" scanning installations...")
 	}
@@ -342,34 +348,60 @@ func (m Model) sdkLines(width int) []string {
 		}
 	}
 
-	lines = append(lines, "", styleLabel.Render("SDKS"))
-	if len(inventory.SDKs) == 0 {
-		lines = append(lines, "  none detected. Install one with hilt sdk install.")
+	sdkLabel := "SDKS"
+	if m.sdkFocus == focusSDKs {
+		sdkLabel += "  " + styleMuted.Render("(focused)")
 	}
-	for _, sdk := range inventory.SDKs {
+	lines = append(lines, "", styleLabel.Render(sdkLabel))
+	if len(inventory.SDKs) == 0 {
+		lines = append(lines, "  none detected. Press i to install a managed SDK.")
+	}
+	updateByVersion := make(map[string]install.Update, len(m.updates))
+	for _, update := range m.updates {
+		updateByVersion[update.Version] = update
+	}
+	for index, sdk := range inventory.SDKs {
 		state := ""
 		if !sdk.Usable {
 			state = "  " + styleWarning.Render("unusable")
 		}
 		marker := " "
+		if index == m.sdkCursor && m.sdkFocus == focusSDKs {
+			marker = ">"
+		}
 		if m.selection != nil && sdk.Root == m.selection.Root && sdk.Version == m.selection.SDKVersion {
 			marker = "*"
 		}
-		lines = append(lines, fmt.Sprintf("  %s %-12s %s  [%s]%s", marker, sdk.Version, sdk.Path, sdk.EffectiveProvenance(), state))
+		line := fmt.Sprintf("  %s %-12s %s  [%s]%s", marker, sdk.Version, sdk.Path, sdk.EffectiveProvenance(), state)
+		if update, ok := updateByVersion[sdk.Version]; ok && update.UpdateAvailable {
+			line += "  " + styleAccent.Render("→ "+update.LatestVersion+" available")
+		}
+		lines = append(lines, line)
 	}
 
-	lines = append(lines, "", styleLabel.Render("RUNTIMES"))
-	if len(inventory.Runtimes) == 0 {
-		lines = append(lines, "  none detected")
+	runtimeLabel := "RUNTIMES"
+	if m.sdkFocus == focusRuntimes {
+		runtimeLabel += "  " + styleMuted.Render("(focused)")
 	}
-	grouped := dotnet.GroupRuntimes(inventory.Runtimes)
-	frameworks := make([]string, 0, len(grouped))
-	for framework := range grouped {
-		frameworks = append(frameworks, framework)
+	lines = append(lines, "", styleLabel.Render(runtimeLabel))
+	runtimes := m.orderedRuntimes()
+	if len(runtimes) == 0 {
+		lines = append(lines, "  none detected. Press tab then i to install a managed runtime.")
 	}
-	sortStrings(frameworks)
-	for _, framework := range frameworks {
-		lines = append(lines, fmt.Sprintf("  %-32s %s", framework, strings.Join(grouped[framework], ", ")))
+	runtimeUpdates := make(map[string]install.Update, len(m.runtimeUpdates))
+	for _, update := range m.runtimeUpdates {
+		runtimeUpdates[update.Version] = update
+	}
+	for index, runtime := range runtimes {
+		marker := " "
+		if index == m.runtimeCursor && m.sdkFocus == focusRuntimes {
+			marker = ">"
+		}
+		line := fmt.Sprintf("  %s %-32s %-12s [%s]", marker, runtime.Framework, runtime.Version, runtime.EffectiveProvenance())
+		if update, ok := runtimeUpdates[runtime.Version]; ok && update.UpdateAvailable {
+			line += "  " + styleAccent.Render("→ "+update.LatestVersion+" available")
+		}
+		lines = append(lines, line)
 	}
 
 	warnings := m.warnings()
@@ -377,6 +409,61 @@ func (m Model) sdkLines(width int) []string {
 		lines = append(lines, "", styleLabel.Render("WARNINGS"))
 		for _, warning := range warnings {
 			lines = append(lines, wrap(warning, width-2)...)
+		}
+	}
+	return lines
+}
+
+func (m Model) managementLines(width int) []string {
+	var lines []string
+	if m.prompt != promptNone {
+		label := "INSTALL SDK"
+		if m.prompt == promptInstallRuntime {
+			label = "INSTALL RUNTIME"
+		}
+		lines = append(lines, "", styleAccent.Render(label))
+		lines = append(lines, "  version  "+m.promptInput+styleMuted.Render("_"))
+		if m.prompt == promptInstallRuntime {
+			lines = append(lines, fmt.Sprintf("  framework %s  %s", m.promptFramework,
+				styleMuted.Render("(left/right to change)")))
+		}
+		lines = append(lines, "  "+styleMuted.Render("enter to resolve · esc to cancel"))
+		return lines
+	}
+	if m.confirm != confirmNone {
+		lines = append(lines, "", styleAccent.Render("CONFIRM"))
+		for _, summary := range m.confirmSummary {
+			lines = append(lines, "  "+summary)
+		}
+		lines = append(lines, "  "+styleMuted.Render("enter/y confirm · esc/n cancel"))
+		return lines
+	}
+	if m.operationRunning {
+		lines = append(lines, "", m.spinner.View()+" "+m.operationLabel)
+		if m.operationCancelling {
+			lines = append(lines, "  "+styleWarning.Render("cancelling..."))
+		}
+		start := 0
+		if len(m.progressLines) > 8 {
+			start = len(m.progressLines) - 8
+		}
+		for _, progress := range m.progressLines[start:] {
+			lines = append(lines, "  "+styleMuted.Render(progress))
+		}
+		return lines
+	}
+	if m.loadingUpdates {
+		lines = append(lines, "", m.spinner.View()+" checking managed updates...")
+		return lines
+	}
+	if m.statusMessage != "" {
+		style := styleOK
+		if m.statusIsError {
+			style = styleError
+		}
+		lines = append(lines, "")
+		for _, wrapped := range wrap(m.statusMessage, width-2) {
+			lines = append(lines, style.Render(wrapped))
 		}
 	}
 	return lines

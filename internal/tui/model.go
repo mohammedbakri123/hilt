@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -16,7 +18,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/platform"
 )
 
-// Backend is the read-only surface the TUI needs.
+// Backend is the data and managed-operation surface the TUI needs.
 type Backend interface {
 	Version() string
 	Platform() platform.Info
@@ -113,6 +115,41 @@ type Model struct {
 
 	showHelp bool
 
+	sdkFocus      focusArea
+	sdkCursor     int
+	runtimeCursor int
+
+	prompt          promptKind
+	promptInput     string
+	promptFramework install.FrameworkFlavor
+
+	confirm        confirmKind
+	confirmSummary []string
+
+	pendingPlan        *install.Plan
+	pendingRuntimePlan *install.RuntimePlan
+	pendingRemove      *removeTarget
+	pendingUpdate      *install.Update
+	pendingFramework   install.FrameworkFlavor
+
+	operationRunning    bool
+	operationCancelling bool
+	operationLabel      string
+	operationCancel     context.CancelFunc
+	operationErr        error
+	progressCh          chan tea.Msg
+	progressLines       []string
+
+	updates        []install.Update
+	runtimeUpdates []install.Update
+	loadingUpdates bool
+	updatesLoaded  bool
+	updatesErr     error
+	updateCancel   context.CancelFunc
+
+	statusMessage string
+	statusIsError bool
+
 	spinner spinner.Model
 }
 
@@ -194,7 +231,122 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.selection = message.selection
 			m.selectionErr = message.selectionErr
 		}
+		m.clampSelection()
 		m.clampScroll()
+		return m, nil
+
+	case sdkPlanMsg:
+		m.finishOperation()
+		if message.err != nil {
+			m.operationErr = message.err
+			m.setStatus(message.err.Error(), true)
+			return m, nil
+		}
+		plan := message.plan
+		m.pendingPlan = &plan
+		m.confirm = confirmInstallSDK
+		m.confirmSummary = sdkPlanSummary(plan)
+		return m, nil
+
+	case runtimePlanMsg:
+		m.finishOperation()
+		if message.err != nil {
+			m.operationErr = message.err
+			m.setStatus(message.err.Error(), true)
+			return m, nil
+		}
+		plan := message.plan
+		m.pendingRuntimePlan = &plan
+		m.confirm = confirmInstallRuntime
+		m.confirmSummary = runtimePlanSummary(plan)
+		return m, nil
+
+	case progressMsg:
+		m.progressLines = append(m.progressLines, message.line)
+		if len(m.progressLines) > 200 {
+			m.progressLines = m.progressLines[len(m.progressLines)-200:]
+		}
+		if m.progressCh == nil {
+			return m, nil
+		}
+		return m, waitForProgress(m.progressCh)
+
+	case operationDoneMsg:
+		m.finishOperation()
+		if message.err != nil {
+			if errors.Is(message.err, context.Canceled) {
+				m.setStatus("Operation cancelled.", false)
+				return m, nil
+			}
+			m.operationErr = message.err
+			m.setStatus(message.err.Error(), true)
+			return m, nil
+		}
+		m.updates = nil
+		m.runtimeUpdates = nil
+		m.updatesLoaded = false
+		switch message.kind {
+		case opInstallSDK:
+			if message.sdk.AlreadyInstalled {
+				m.setStatus(fmt.Sprintf("SDK %s is already installed in the managed root.", message.sdk.Version), false)
+			} else {
+				m.setStatus(fmt.Sprintf("Installed and verified managed SDK %s.", message.sdk.Version), false)
+			}
+		case opInstallRuntime:
+			if message.runtime.AlreadyInstalled {
+				m.setStatus(fmt.Sprintf("Runtime %s is already installed in the managed root.", message.runtime.Version), false)
+			} else {
+				m.setStatus(fmt.Sprintf("Installed and verified managed runtime %s (%s).", message.runtime.Version, message.runtime.Framework), false)
+			}
+		case opRemoveSDK:
+			m.setStatus(fmt.Sprintf("Removed managed SDK %s.", message.removal.Version), false)
+		case opRemoveRuntime:
+			m.setStatus(fmt.Sprintf("Removed managed runtime %s.", message.removal.Version), false)
+		case opUpdateSDK:
+			if !message.update.UpdateAvailable {
+				m.setStatus(fmt.Sprintf("SDK %s is already up to date.", message.update.From), false)
+			} else {
+				status := fmt.Sprintf("Updated SDK %s to %s.", message.update.From, message.update.To)
+				if message.update.OldRetained {
+					status += " The old version is retained."
+				}
+				m.setStatus(status, false)
+			}
+		case opUpdateRuntime:
+			m.setStatus(fmt.Sprintf("Installed newer managed runtime %s; the previous runtime is retained.", message.runtime.Version), false)
+		}
+		m.loadingInventory = true
+		return m, tea.Batch(m.inventoryCmd(), m.spinner.Tick)
+
+	case updatesMsg:
+		m.loadingUpdates = false
+		if m.updateCancel != nil {
+			m.updateCancel()
+			m.updateCancel = nil
+		}
+		if message.err != nil {
+			m.updatesErr = message.err
+			if errors.Is(message.err, context.Canceled) {
+				m.setStatus("Update check cancelled.", false)
+			} else {
+				m.setStatus(message.err.Error(), true)
+			}
+			return m, nil
+		}
+		m.updates = message.sdk
+		m.runtimeUpdates = message.runtime
+		m.updatesLoaded = true
+		available := 0
+		for _, update := range append(append([]install.Update(nil), m.updates...), m.runtimeUpdates...) {
+			if update.UpdateAvailable {
+				available++
+			}
+		}
+		if available == 0 {
+			m.setStatus("Update check complete: everything is up to date.", false)
+		} else {
+			m.setStatus(fmt.Sprintf("Update check complete: %d update(s) available. Select an item and press u to apply.", available), false)
+		}
 		return m, nil
 
 	case doctorMsg:
@@ -224,6 +376,30 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.operationRunning {
+		switch key {
+		case "esc", "ctrl+c", "q":
+			m.cancelOperation()
+		}
+		return m, nil
+	}
+
+	if m.loadingUpdates {
+		switch key {
+		case "esc", "ctrl+c", "q":
+			m.cancelOperation()
+		}
+		return m, nil
+	}
+
+	if m.prompt != promptNone {
+		return m.handlePromptKey(message)
+	}
+
+	if m.confirm != confirmNone {
+		return m.handleConfirmKey(message)
+	}
+
 	switch key {
 	case "ctrl+c", "q":
 		return m, tea.Quit
@@ -241,10 +417,54 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		command := m.navigate(ScreenDiagnostics)
 		return m, command
+	case "esc":
+		m.setStatus("", false)
+		return m, nil
 	case "1", "2", "3", "4", "5", "6", "7", "8":
 		index := int(key[0] - '1')
 		command := m.navigate(Screen(index))
 		return m, command
+	}
+
+	if m.screen == ScreenSDKs {
+		switch key {
+		case "tab":
+			if m.sdkFocus == focusSDKs {
+				m.sdkFocus = focusRuntimes
+			} else {
+				m.sdkFocus = focusSDKs
+			}
+			return m, nil
+		case "up", "k":
+			m.nudgeSelection(-1)
+			return m, nil
+		case "down", "j":
+			m.nudgeSelection(1)
+			return m, nil
+		case "i":
+			if m.sdkFocus == focusRuntimes {
+				m.startRuntimePrompt()
+			} else {
+				m.startSDKPrompt()
+			}
+			return m, nil
+		case "x":
+			m.beginRemove()
+			return m, nil
+		case "u":
+			if m.updatesLoaded {
+				return m, m.beginUpdate()
+			}
+			return m, m.beginUpdateCheck()
+		}
+	}
+
+	if m.screen == ScreenDashboard && key == "i" {
+		m.startSDKPrompt()
+		return m, nil
+	}
+
+	switch key {
 	case "tab", "right", "l":
 		command := m.navigate(Screen((int(m.screen) + 1) % len(screens)))
 		return m, command
@@ -274,6 +494,52 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	return m, nil
+}
+
+func (m Model) handlePromptKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "esc", "ctrl+c":
+		m.clearPrompt()
+		m.setStatus("Install cancelled.", false)
+		return m, nil
+	case "enter":
+		return m, m.submitPrompt()
+	case "backspace", "ctrl+h":
+		if m.promptInput != "" {
+			runes := []rune(m.promptInput)
+			m.promptInput = string(runes[:len(runes)-1])
+		}
+		return m, nil
+	case "ctrl+u":
+		m.promptInput = ""
+		return m, nil
+	case "left":
+		if m.prompt == promptInstallRuntime {
+			m.previousFramework()
+		}
+		return m, nil
+	case "right", "tab":
+		if m.prompt == promptInstallRuntime {
+			m.nextFramework()
+		}
+		return m, nil
+	}
+	if message.Text != "" && message.Mod&tea.ModCtrl == 0 && message.Mod&tea.ModAlt == 0 {
+		m.promptInput += message.Text
+	}
+	return m, nil
+}
+
+func (m Model) handleConfirmKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "esc", "n":
+		m.clearConfirm()
+		m.setStatus("Cancelled.", false)
+		return m, nil
+	case "enter", "y":
+		return m, m.confirmAction()
+	}
 	return m, nil
 }
 
