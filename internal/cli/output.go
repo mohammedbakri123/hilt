@@ -11,6 +11,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 const schemaVersion = 1
@@ -300,6 +301,87 @@ func printUpdates(writer io.Writer, updates []install.Update) {
 	}
 	if !available {
 		fmt.Fprintln(writer, "All managed .NET SDKs are up to date.")
+	}
+}
+
+func printProjectList(writer io.Writer, result projects.Result) {
+	fmt.Fprintf(writer, "Projects under %s\n\n", result.Root)
+	if len(result.Workspaces) == 0 && len(result.Projects) == 0 {
+		fmt.Fprintln(writer, "No projects or solutions found.")
+		printProjectWarnings(writer, result.Warnings)
+		return
+	}
+	if len(result.Workspaces) > 0 {
+		fmt.Fprintf(writer, "WORKSPACES (%d)\n", len(result.Workspaces))
+		table := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(table, "KIND\tNAME\tPROJECTS\tPATH")
+		for _, workspace := range result.Workspaces {
+			fmt.Fprintf(table, "%s\t%s\t%d\t%s\n", workspace.Kind, workspace.Name, len(workspace.ProjectPaths), workspace.Path)
+		}
+		_ = table.Flush()
+		fmt.Fprintln(writer)
+	}
+	if len(result.Projects) > 0 {
+		fmt.Fprintf(writer, "PROJECTS (%d)\n", len(result.Projects))
+		printProjectTable(writer, result.Projects)
+	} else {
+		fmt.Fprintln(writer, "No .csproj files found.")
+	}
+	printProjectWarnings(writer, result.Warnings)
+}
+
+func printProjectTable(writer io.Writer, discovered []projects.Project) {
+	table := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(table, "NAME\tFRAMEWORKS\tTEST\tSDK\tPATH")
+	for _, project := range discovered {
+		test := ""
+		if project.TestProject {
+			test = "yes"
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n",
+			project.Name, valueOr(strings.Join(project.TargetFrameworks, "; "), "none"),
+			test, valueOr(project.SDK, "unknown"), project.Path)
+	}
+	_ = table.Flush()
+}
+
+func printProjectInspection(writer io.Writer, inspection projects.Inspection) {
+	workspace := inspection.Workspace
+	if inspection.Kind == projects.KindProject {
+		fmt.Fprintf(writer, "Project %s\n", workspace.Name)
+	} else {
+		fmt.Fprintf(writer, "Solution %s (%s)\n", workspace.Name, workspace.Kind)
+	}
+	fmt.Fprintf(writer, "  Path        %s\n", workspace.Path)
+	fmt.Fprintf(writer, "  Directory   %s\n", workspace.Directory)
+	if workspace.SolutionPath != "" {
+		fmt.Fprintf(writer, "  Solution    %s\n", workspace.SolutionPath)
+	}
+	fmt.Fprintf(writer, "  Projects    %d\n", len(workspace.ProjectPaths))
+
+	if len(inspection.Projects) > 0 {
+		fmt.Fprintln(writer)
+		printProjectTable(writer, inspection.Projects)
+	}
+	for _, project := range inspection.Projects {
+		if len(project.ProjectReferences) == 0 {
+			continue
+		}
+		fmt.Fprintf(writer, "\nReferences for %s\n", project.Name)
+		for _, reference := range project.ProjectReferences {
+			fmt.Fprintf(writer, "  %s\n", reference)
+		}
+	}
+	printProjectWarnings(writer, inspection.Warnings)
+}
+
+func printProjectWarnings(writer io.Writer, warnings []string) {
+	if len(warnings) == 0 {
+		return
+	}
+	fmt.Fprintln(writer, "\nWARNINGS")
+	for _, warning := range warnings {
+		fmt.Fprintf(writer, "  ! %s\n", warning)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 type fakeBackend struct {
@@ -44,6 +45,11 @@ type fakeBackend struct {
 	runtimeRemoveErr  error
 	runtimeUpdates    []install.Update
 	runtimeUpdatesErr error
+	projectResult     projects.Result
+	projectErr        error
+	inspection        projects.Inspection
+	inspectErr        error
+	scanRequests      *[]string
 	report            diagnostics.Report
 }
 
@@ -104,6 +110,19 @@ func (f fakeBackend) RemoveRuntime(context.Context, string) (install.Removal, er
 }
 func (f fakeBackend) CheckRuntimeUpdates(context.Context) ([]install.Update, error) {
 	return f.runtimeUpdates, f.runtimeUpdatesErr
+}
+func (f fakeBackend) ScanProjects(_ context.Context, root string, includeHidden bool) (projects.Result, error) {
+	if f.scanRequests != nil {
+		request := root
+		if includeHidden {
+			request += "|all"
+		}
+		*f.scanRequests = append(*f.scanRequests, request)
+	}
+	return f.projectResult, f.projectErr
+}
+func (f fakeBackend) InspectProject(context.Context, string) (projects.Inspection, error) {
+	return f.inspection, f.inspectErr
 }
 func (f fakeBackend) Diagnose(context.Context) diagnostics.Report { return f.report }
 func (f fakeBackend) Tool(string) (string, bool)                  { return "", false }
@@ -1289,5 +1308,158 @@ func TestSDKUpdateErrors(t *testing.T) {
 	invalid := run(t, []string{"sdk", "update", "latest"}, populatedBackend(), false, nil)
 	if invalid.code != 2 || !strings.Contains(invalid.stderr, "invalid SDK version") {
 		t.Errorf("invalid version = %d %q", invalid.code, invalid.stderr)
+	}
+}
+
+func projectFixture() projects.Result {
+	return projects.Result{
+		Root: "/repo",
+		Workspaces: []projects.Workspace{{
+			Path:         "/repo/Shop.sln",
+			Name:         "Shop",
+			Directory:    "/repo",
+			Kind:         projects.KindSolution,
+			ProjectPaths: []string{"/repo/src/Shop/Shop.csproj"},
+		}},
+		Projects: []projects.Project{{
+			Path:              "/repo/src/Shop/Shop.csproj",
+			Name:              "Shop",
+			Directory:         "/repo/src/Shop",
+			Kind:              projects.KindProject,
+			TargetFrameworks:  []string{"net10.0", "net9.0"},
+			SDK:               "Microsoft.NET.Sdk",
+			OutputType:        "Exe",
+			TestProject:       false,
+			ProjectReferences: []string{"/repo/src/Library/Library.csproj"},
+		}},
+		Warnings: []string{"broken.csproj: unexpected EOF"},
+	}
+}
+
+func TestProjectsListHuman(t *testing.T) {
+	backend := populatedBackend()
+	backend.projectResult = projectFixture()
+	result := run(t, []string{"projects", "list", "--path", "/repo"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Projects under /repo", "WORKSPACES", "Shop.sln", "PROJECTS", "net10.0; net9.0", "Microsoft.NET.Sdk", "/repo/src/Shop/Shop.csproj", "WARNINGS", "broken.csproj"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestProjectsListFlagsAndJSON(t *testing.T) {
+	backend := populatedBackend()
+	backend.projectResult = projectFixture()
+	requests := []string{}
+	backend.scanRequests = &requests
+	result := run(t, []string{"projects", "list", "--path", "/repo", "--all", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	if len(requests) != 1 || requests[0] != "/repo|all" {
+		t.Errorf("scan requests = %v", requests)
+	}
+	var payload struct {
+		SchemaVersion int                  `json:"schemaVersion"`
+		Root          string               `json:"root"`
+		Workspaces    []projects.Workspace `json:"workspaces"`
+		Projects      []projects.Project   `json:"projects"`
+		Warnings      []string             `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, result.stdout)
+	}
+	if payload.SchemaVersion != 1 || payload.Root != "/repo" {
+		t.Errorf("payload = %+v", payload)
+	}
+	if len(payload.Workspaces) != 1 || len(payload.Projects) != 1 || len(payload.Warnings) != 1 {
+		t.Errorf("payload = %+v", payload)
+	}
+	if payload.Projects[0].TargetFrameworks[1] != "net9.0" {
+		t.Errorf("project = %+v", payload.Projects[0])
+	}
+}
+
+func TestProjectsListEmptyJSONUsesArrays(t *testing.T) {
+	result := run(t, []string{"projects", "list", "--json"}, populatedBackend(), false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{`"workspaces": []`, `"projects": []`, `"warnings": []`} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestProjectsListFailure(t *testing.T) {
+	backend := populatedBackend()
+	backend.projectErr = errors.New("cannot scan")
+	result := run(t, []string{"projects", "list"}, backend, false, nil)
+	if result.code != 1 || !strings.Contains(result.stderr, "cannot scan") {
+		t.Fatalf("exit=%d stderr=%q", result.code, result.stderr)
+	}
+}
+
+func TestProjectsInspectHuman(t *testing.T) {
+	backend := populatedBackend()
+	fixture := projectFixture()
+	backend.inspection = projects.Inspection{
+		Kind:      projects.KindSolution,
+		Workspace: fixture.Workspaces[0],
+		Projects:  fixture.Projects,
+		Warnings:  []string{"missing.csproj: no such file"},
+	}
+	result := run(t, []string{"projects", "inspect", "/repo/Shop.sln"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Solution Shop (sln)", "/repo/Shop.sln", "Projects    1", "References for Shop", "/repo/src/Library/Library.csproj", "missing.csproj"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestProjectsInspectJSON(t *testing.T) {
+	backend := populatedBackend()
+	fixture := projectFixture()
+	backend.inspection = projects.Inspection{
+		Kind:      projects.KindProject,
+		Workspace: fixture.Workspaces[0],
+		Projects:  fixture.Projects,
+	}
+	result := run(t, []string{"projects", "inspect", "/repo/src/Shop/Shop.csproj", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	var payload struct {
+		SchemaVersion int                 `json:"schemaVersion"`
+		Inspection    projects.Inspection `json:"inspection"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, result.stdout)
+	}
+	if payload.SchemaVersion != 1 || payload.Inspection.Kind != projects.KindProject || len(payload.Inspection.Projects) != 1 {
+		t.Errorf("payload = %+v", payload)
+	}
+	if payload.Inspection.Warnings == nil {
+		t.Error("warnings must be an array")
+	}
+}
+
+func TestProjectsInspectFailureAndUsage(t *testing.T) {
+	backend := populatedBackend()
+	backend.inspectErr = errors.New("invalid project")
+	result := run(t, []string{"projects", "inspect", "/repo/Broken.csproj"}, backend, false, nil)
+	if result.code != 1 || !strings.Contains(result.stderr, "invalid project") {
+		t.Fatalf("exit=%d stderr=%q", result.code, result.stderr)
+	}
+	missing := run(t, []string{"projects", "inspect"}, backend, false, nil)
+	if missing.code != 2 {
+		t.Errorf("missing argument exit = %d, want 2", missing.code)
 	}
 }

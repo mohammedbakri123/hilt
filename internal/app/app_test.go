@@ -10,6 +10,7 @@ import (
 
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 func TestNewUsesXDGPathsAndDefaults(t *testing.T) {
@@ -283,5 +284,49 @@ func TestRemoveSDKNotInstalled(t *testing.T) {
 	_, err := app.RemoveSDK(context.Background(), "10.0.100")
 	if err == nil || !strings.Contains(err.Error(), "not installed") {
 		t.Fatalf("error = %v, want not installed", err)
+	}
+}
+
+func TestScanProjectsUsesRootAndConfiguration(t *testing.T) {
+	home := t.TempDir()
+	dataDir := filepath.Join(home, "data")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", dataDir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
+
+	projectDir := filepath.Join(home, "work")
+	if err := os.MkdirAll(projectDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(projectDir, "App.csproj")
+	if err := os.WriteFile(projectPath, []byte(`<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	application := New("test")
+	result, err := application.ScanProjects(context.Background(), projectDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Projects) != 1 || result.Projects[0].Path != projectPath {
+		t.Fatalf("projects = %+v", result.Projects)
+	}
+
+	inspection, err := application.InspectProject(context.Background(), projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Kind != projects.KindProject || len(inspection.Projects) != 1 {
+		t.Errorf("inspection = %+v", inspection)
+	}
+
+	t.Chdir(projectDir)
+	application = New("test")
+	result, err = application.ScanProjects(context.Background(), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Projects) != 1 || result.Projects[0].Path != projectPath {
+		t.Errorf("current-directory scan = %+v", result.Projects)
 	}
 }

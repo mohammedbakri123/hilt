@@ -15,6 +15,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/process"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 // App is the composition root for Hilt services. It is safe to construct
@@ -178,6 +179,27 @@ func (a *App) CheckSDKUpdates(ctx context.Context) ([]install.Update, error) {
 // downloads or filesystem changes.
 func (a *App) AvailableSDKs(ctx context.Context, allowPrerelease bool) ([]install.AvailableSDK, error) {
 	return a.installer().AvailableSDKs(ctx, allowPrerelease)
+}
+
+// ScanProjects discovers projects and solutions from root. An empty root uses
+// the configured default project directory, then the current directory.
+func (a *App) ScanProjects(ctx context.Context, root string, includeHidden bool) (projects.Result, error) {
+	if root == "" {
+		root = a.config.DefaultProjectDir
+	}
+	if root == "" {
+		root = a.cwd
+	}
+	return projects.Scan(ctx, projects.Options{
+		Root:          root,
+		Exclusions:    a.config.ScanExclusions,
+		IncludeHidden: includeHidden,
+	})
+}
+
+// InspectProject parses one project or solution file.
+func (a *App) InspectProject(ctx context.Context, path string) (projects.Inspection, error) {
+	return projects.Inspect(ctx, path)
 }
 
 // UpdateSDK applies a managed SDK update.
