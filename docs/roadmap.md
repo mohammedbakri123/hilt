@@ -1,9 +1,10 @@
 # Roadmap
 
-Phase 1 is complete. Phase 2 managed SDKs and runtimes are feature-complete.
-Phase 3 project discovery is implemented; MSBuild evaluation, builds, and
-execution remain planned. Commands that do not work are not registered, and
-screens state that they are placeholders.
+Phase 1 is complete. Phase 2 managed SDKs and runtimes are implemented; the
+package-manager adapter remains. Phase 3 project discovery is implemented;
+MSBuild evaluation, builds, and execution remain planned. Commands that do not
+work are not registered, and unimplemented screens state that they are
+placeholders.
 
 ## Phase 2 — Managed SDKs (partially implemented)
 
