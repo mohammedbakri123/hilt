@@ -1757,3 +1757,64 @@ func TestProjectsMarksExternalProjects(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectTabs(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	plain := ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "[Overview]") || !strings.Contains(plain, "Microsoft.NET.Sdk") {
+		t.Fatalf("overview tab missing:\n%s", plain)
+	}
+
+	model = press(t, model, key(']', "]"))
+	if model.projectTab != projectTabPackages {
+		t.Fatalf("tab = %v, want packages", model.projectTab)
+	}
+	plain = ansi.Strip(model.View().Content)
+	for _, want := range []string{"[Packages]", "No package actions yet"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("packages tab missing %q:\n%s", want, plain)
+		}
+	}
+
+	model = press(t, model, key(']', "]"))
+	plain = ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "[Data]") || !strings.Contains(plain, "No migrations loaded") {
+		t.Errorf("data tab missing:\n%s", plain)
+	}
+
+	model = press(t, model, key(']', "]"))
+	plain = ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "[Output]") || !strings.Contains(plain, "No build or run output yet") {
+		t.Errorf("output tab missing:\n%s", plain)
+	}
+
+	model = press(t, model, key(']', "]"))
+	if model.projectTab != projectTabOverview {
+		t.Fatalf("tab did not wrap to overview: %v", model.projectTab)
+	}
+	model = press(t, model, key('[', "["))
+	if model.projectTab != projectTabOutput {
+		t.Fatalf("tab did not wrap backwards to output: %v", model.projectTab)
+	}
+}
+
+func TestProjectTabsResetDetailScroll(t *testing.T) {
+	backend := newFakeBackend()
+	result := projectFixture()
+	for index := 0; index < 30; index++ {
+		result.Projects[0].ProjectReferences = append(result.Projects[0].ProjectReferences, fmt.Sprintf("/work/src/Ref%02d/Ref%02d.csproj", index, index))
+	}
+	backend.projectResult = result
+	model := openProjects(t, backend, 160, 30)
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if model.projectDetailScroll == 0 {
+		t.Fatal("detail did not scroll")
+	}
+	model = press(t, model, key(']', "]"))
+	if model.projectDetailScroll != 0 {
+		t.Fatalf("tab change kept detail scroll %d", model.projectDetailScroll)
+	}
+}

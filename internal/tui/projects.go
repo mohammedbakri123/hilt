@@ -24,6 +24,30 @@ const (
 	projectFocusDetail
 )
 
+type projectTab int
+
+const (
+	projectTabOverview projectTab = iota
+	projectTabPackages
+	projectTabData
+	projectTabOutput
+)
+
+var projectTabs = []struct {
+	title string
+	label string
+}{
+	{title: "OVERVIEW", label: "Overview"},
+	{title: "PACKAGES", label: "Packages"},
+	{title: "DATA", label: "Data"},
+	{title: "OUTPUT", label: "Output"},
+}
+
+func (m *Model) moveProjectTab(delta int) {
+	m.projectTab = projectTab((int(m.projectTab) + delta + len(projectTabs)) % len(projectTabs))
+	m.projectDetailScroll = 0
+}
+
 func (m *Model) startProjectsScan() tea.Cmd {
 	if m.backend == nil {
 		return nil

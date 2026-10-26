@@ -164,6 +164,7 @@ type Model struct {
 	projectListScroll   int
 	projectDetailScroll int
 	projectFocus        projectFocus
+	projectTab          projectTab
 	projectFilter       string
 	projectFiltering    bool
 	projectCancel       context.CancelFunc
@@ -547,6 +548,12 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "[":
+			m.moveProjectTab(-1)
+			return m, nil
+		case "]":
+			m.moveProjectTab(1)
+			return m, nil
 		case "up", "k":
 			if m.projectSplit() && m.projectFocus == projectFocusDetail {
 				m.scrollFocusedBy(-1)

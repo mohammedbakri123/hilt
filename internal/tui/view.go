@@ -548,13 +548,10 @@ func (m Model) projectLines(width int) []string {
 		listWidth, detailWidth := projectPaneWidths(width)
 		listContent, _ := m.projectListContent()
 		detailContent := []string{styleMuted.Render("Select a project to see its overview.")}
-		if project, ok := m.selectedProject(); ok {
-			detailContent = m.projectDetailContent(project, detailWidth-4)
-		}
-		detailContent = projectWarningContent(detailContent, result.Warnings, detailWidth-4)
+		detailContent = m.projectDetailBody(detailWidth - 4)
 		height := m.projectPaneHeight()
 		listPane := panelWindow("PROJECTS", listContent, listWidth, height, m.projectListScroll, m.projectFocus == projectFocusList)
-		detailPane := panelWindow("OVERVIEW", detailContent, detailWidth, height, m.projectDetailScroll, m.projectFocus == projectFocusDetail)
+		detailPane := panelWindow(projectTabs[m.projectTab].title, detailContent, detailWidth, height, m.projectDetailScroll, m.projectFocus == projectFocusDetail)
 		return append(lines, joinPanes(listPane, detailPane)...)
 	}
 
@@ -584,9 +581,9 @@ func (m Model) projectLines(width int) []string {
 		lines = append(lines, m.projectRow(project, index, false))
 	}
 
-	if project, ok := m.selectedProject(); ok {
+	if _, ok := m.selectedProject(); ok {
 		lines = append(lines, "")
-		lines = append(lines, m.projectDetailPanel(project, width)...)
+		lines = append(lines, m.projectDetailPanel(width)...)
 	}
 
 	lines = projectWarningContent(lines, result.Warnings, width)
@@ -721,8 +718,58 @@ func (m Model) projectDetailContent(project projects.Project, width int) []strin
 	return content
 }
 
-func (m Model) projectDetailPanel(project projects.Project, width int) []string {
-	return panelBox("SELECTED PROJECT", m.projectDetailContent(project, width-6), width)
+func (m Model) projectDetailPanel(width int) []string {
+	return panelBox("SELECTED PROJECT", m.projectDetailBody(width-6), width)
+}
+
+func (m Model) projectDetailBody(width int) []string {
+	lines := []string{}
+	if project, ok := m.selectedProject(); ok {
+		lines = append(lines, m.projectTabBar(), "")
+		lines = append(lines, m.projectTabContent(project, width)...)
+	} else {
+		lines = append(lines, styleMuted.Render("Select a project to see its details."))
+	}
+	if m.projectResult != nil {
+		lines = projectWarningContent(lines, m.projectResult.Warnings, width)
+	}
+	return lines
+}
+
+func (m Model) projectTabBar() string {
+	parts := make([]string, 0, len(projectTabs))
+	for index, tab := range projectTabs {
+		if projectTab(index) == m.projectTab {
+			parts = append(parts, styleValue.Render("["+tab.label+"]"))
+			continue
+		}
+		parts = append(parts, styleMuted.Render(tab.label))
+	}
+	return "  " + strings.Join(parts, "  ")
+}
+
+func (m Model) projectTabContent(project projects.Project, width int) []string {
+	switch m.projectTab {
+	case projectTabPackages:
+		return []string{
+			styleMuted.Render("No package actions yet."),
+			"",
+			styleMuted.Render("Package listing and management arrive after the build and run foundation."),
+		}
+	case projectTabData:
+		return []string{
+			styleMuted.Render("No migrations loaded."),
+			"",
+			styleMuted.Render("EF Design support and dotnet-ef are not wired yet. Hilt never installs dotnet-ef automatically."),
+		}
+	case projectTabOutput:
+		return []string{
+			styleMuted.Render("No build or run output yet."),
+			"",
+			styleMuted.Render("Build and run actions are not available yet. Output will stream here."),
+		}
+	}
+	return m.projectDetailContent(project, width)
 }
 
 func projectWarningContent(lines []string, warnings []string, width int) []string {
@@ -764,17 +811,11 @@ func (m Model) projectListContentHeight() int {
 }
 
 func (m Model) projectDetailContentHeight() int {
-	lines := []string{styleMuted.Render("Select a project to see its overview.")}
 	width := m.contentWidth()
 	if m.projectSplit() {
 		_, width = projectPaneWidths(width)
 	}
-	if project, ok := m.selectedProject(); ok {
-		lines = m.projectDetailContent(project, width-4)
-	}
-	if m.projectResult != nil {
-		lines = projectWarningContent(lines, m.projectResult.Warnings, width-4)
-	}
+	lines := m.projectDetailBody(width - 4)
 	visible := m.projectPaneHeight() - 3
 	if visible < 1 {
 		visible = 1

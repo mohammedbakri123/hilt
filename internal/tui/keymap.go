@@ -31,6 +31,7 @@ const (
 	actionFramework       keyAction = "framework"
 	actionResolve         keyAction = "resolve"
 	actionFilter          keyAction = "filter"
+	actionProjectTab      keyAction = "project-tab"
 )
 
 type keyContext string
@@ -144,6 +145,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
+		{Key: "[/]", Action: actionProjectTab, Label: "tab", Compact: true},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
@@ -152,6 +154,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "tab", Action: actionSwitchFocus, Label: "focus", Compact: true},
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
+		{Key: "[/]", Action: actionProjectTab, Label: "tab", Compact: true},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
@@ -181,6 +184,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "↑/↓  j/k", Action: actionMove, Label: "move", Help: "move selection or section"},
 		{Key: "enter", Action: actionConfirm, Label: "open", Help: "open section / confirm prompt"},
 		{Key: "/", Action: actionFilter, Label: "filter", Help: "filter the current list"},
+		{Key: "[ / ]", Action: actionProjectTab, Label: "tab", Help: "cycle project tabs"},
 	}},
 	ctxHelpManaged: {Bindings: []keyBinding{
 		{Key: "i", Action: actionInstall, Label: "install", Help: "install SDK or runtime"},
