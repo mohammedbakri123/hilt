@@ -1,0 +1,7 @@
+<Project>
+  <Sdk Name="Microsoft.NET.Sdk" Version="10.0.100" />
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+</Project>
