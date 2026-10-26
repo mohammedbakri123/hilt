@@ -49,6 +49,20 @@ Installation behavior:
 - If the same version exists in a system root, Hilt still installs the private
   copy and says so.
 
+## Managed runtime installs
+
+Hilt installs .NET runtime archives into the managed root alongside SDKs.
+`hilt runtime install <version> --framework all|netcore|aspnetcore` downloads
+the runtime (and ASP.NET Core runtime when requested), verifies both, and
+publishes them atomically. Runtimes are verified with `dotnet --list-runtimes`.
+
+## Managed SDK updates
+
+`hilt sdk update <version> [--remove-old]` installs the newest stable SDK in
+the same release channel without touching the previous one. With `--remove-old`,
+the previous SDK is removed only after the new one is installed and verified;
+a removal failure leaves the new SDK installed and reports partial success.
+
 ## Removal
 
 `hilt sdk remove <version>` removes only an SDK that is both inside the managed
@@ -62,6 +76,10 @@ root and recorded in Hilt's install manifest.
   removed from the manifest. If deletion fails, the rename is rolled back and
   the manifest entry is kept.
 - A manifest entry whose root escapes the managed root is refused.
+
+## Runtime updates
+
+`hilt runtime outdated` checks managed runtimes for newer stable releases in their channel. It is read-only.
 
 ## Update checks
 
@@ -77,7 +95,6 @@ Update checks require network access to Microsoft release metadata.
 - It does not modify `PATH` or edit shell startup files.
 - It does not modify, upgrade, or remove system or external SDKs.
 - It does not update automatically.
-- It does not install runtimes yet.
 - It does not write project files, NuGet state, or templates yet.
 
 System package-manager installation remains an explicit alternative, not the

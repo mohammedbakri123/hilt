@@ -336,7 +336,7 @@ Tasks:
 - Automatic `PATH` shims or shell startup edits.
 - Machine-wide or multi-user installs.
 - Channels, aliases, and automatic updates.
-- Runtime installation and applying updates (remaining Phase 2 work).
+- Runtime installation and applying updates (implemented in Phase 2).
 - Project execution, NuGet, and templates (later phases).
 
 ## References

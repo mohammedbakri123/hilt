@@ -6,7 +6,7 @@ standalone Go executable: it starts and reports useful information even when no
 
 ## Status
 
-Phase 1 and the managed-SDK portion of Phase 2 are implemented.
+Phase 1 and the managed SDK/runtime portions of Phase 2 are implemented.
 
 Phase 1 provides:
 
@@ -29,13 +29,15 @@ Phase 2 managed SDKs provide:
 - `hilt sdk remove <version>` only for manifest-owned installations.
 - `hilt sdk outdated` for explicit same-channel update checks. Hilt never
   updates automatically.
+- `hilt sdk update <version> [--remove-old]` applies a managed SDK update.
+- `hilt runtime install <version> --framework all|netcore|aspnetcore`.
+- `hilt runtime remove <version>` and `hilt runtime outdated`.
 - Read-wide discovery with write-private mutations: system and external SDKs
   are never modified or removed, and Hilt never uses `sudo` or edits `PATH`.
 
-Not implemented: runtime installation, applying SDK updates, TUI install/remove
-controls, package-manager writes, project scanning, builds, NuGet operations,
-and templates. The corresponding screens say so explicitly. See
-[docs/roadmap.md](docs/roadmap.md).
+Not implemented: TUI install/remove controls, package-manager writes, project
+scanning, builds, NuGet operations, and templates. The corresponding screens
+say so explicitly. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 
@@ -75,7 +77,13 @@ bin/hilt sdk remove <version>
 bin/hilt sdk remove <version> --json
 bin/hilt sdk outdated
 bin/hilt sdk outdated --json
+bin/hilt sdk update <version>
+bin/hilt sdk update <version> --json
 bin/hilt runtime list
+bin/hilt runtime install <version> --framework all
+bin/hilt runtime remove <version>
+bin/hilt runtime outdated
+bin/hilt runtime outdated --json
 bin/hilt version
 ```
 

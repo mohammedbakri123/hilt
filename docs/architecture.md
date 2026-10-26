@@ -63,7 +63,7 @@ cmd/hilt
    stages and verifies the toolchain, publishes it atomically, then records it
    in the manifest. `hilt sdk remove` reverses that only for manifest-owned
    roots. `hilt sdk outdated` reads metadata and reports newer same-channel
-   stable versions. The TUI remains read-only for managed mutations.
+   stable versions. The TUI remains read-only for managed mutations. `hilt sdk update` and `hilt runtime install/remove/outdated` extend the same install flow.
 
 ## Contracts
 
@@ -71,7 +71,7 @@ cmd/hilt
 - Every command takes a `context.Context`; cancellation kills the process group.
 - Parsers are exported so captured .NET output can be tested without .NET.
 - Configuration saves are atomic, mode `0600`, and preserve unknown fields.
-- The install manifest uses `schemaVersion: 1`, stores roots relative to the
+- The install manifest uses `schemaVersion: 2` (runtime-aware), stores roots relative to the
   managed root, and is written atomically with mode `0600`.
 - Managed SDKs live at `<managedRoot>/<version>`. Ownership comes from the
   manifest, not from the path alone.

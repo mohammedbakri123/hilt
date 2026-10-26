@@ -23,10 +23,16 @@ Implemented:
 - Explicit same-channel update checks; no automatic updates.
 - Read-wide discovery with no `sudo`, package-manager writes, or `PATH` edits.
 
+Implemented (continued):
+
+- Managed runtime installation, removal, and update checks for netcore and
+  aspnetcore frameworks.
+- Applying SDK updates (`hilt sdk update`), plus channels, aliases, and
+  prerelease policies.
+- Version requests (`latest`, `lts`, `10.0`, exact versions, `--prerelease`).
+
 Remaining:
 
-- Runtime installation, removal, and update checks.
-- Applying SDK updates, plus channels, aliases, and prerelease policies.
 - TUI install/remove controls.
 - Arch/CachyOS pacman adapter with availability checks and explicit approval.
 

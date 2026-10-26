@@ -600,7 +600,7 @@ The phase must result in a working executable that starts and displays the UI ev
 - Verification after installation.
 - Multiple SDK versions.
 - Safe removal of Hilt-managed versions.
-- Arch/CachyOS package-manager adapter.
+- OS-independent managed installation from official Microsoft archives.
 - Explicit system-installation confirmation.
 
 Test discovery and installation failures, not only successful paths.
