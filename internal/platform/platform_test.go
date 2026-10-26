@@ -83,37 +83,75 @@ func TestDetectFromMissingFiles(t *testing.T) {
 	}
 }
 
-func TestNewPathsXDG(t *testing.T) {
-	env := map[string]string{
-		"XDG_CONFIG_HOME": "/tmp/cfg",
-		"XDG_STATE_HOME":  "/tmp/state",
-		"XDG_CACHE_HOME":  "relative-ignored",
-		"XDG_DATA_HOME":   "/tmp/data",
-	}
+func TestNewPathsHiltHomeOverride(t *testing.T) {
+	env := map[string]string{"HILT_HOME": "/srv/hilt"}
 	paths := NewPaths(func(k string) string { return env[k] }, "/home/user")
-	if paths.ConfigDir != "/tmp/cfg/hilt" {
+	if paths.HomeDir != "/srv/hilt" {
+		t.Errorf("HomeDir = %q", paths.HomeDir)
+	}
+	if paths.ProjectsRoot != "/srv/hilt/apps" {
+		t.Errorf("ProjectsRoot = %q", paths.ProjectsRoot)
+	}
+	if paths.ConfigDir != "/srv/hilt/.hilt" {
 		t.Errorf("ConfigDir = %q", paths.ConfigDir)
 	}
-	if paths.StateDir != "/tmp/state/hilt" {
+	if paths.StateDir != "/srv/hilt/.hilt" {
 		t.Errorf("StateDir = %q", paths.StateDir)
 	}
-	if paths.CacheDir != "/home/user/.cache/hilt" {
+	if paths.CacheDir != "/srv/hilt/.hilt/cache" {
 		t.Errorf("CacheDir = %q", paths.CacheDir)
 	}
-	if paths.ManagedRoot != "/tmp/data/hilt/dotnet" {
+	if paths.DataDir != "/srv/hilt/.hilt/data" {
+		t.Errorf("DataDir = %q", paths.DataDir)
+	}
+	if paths.LogsDir != "/srv/hilt/.hilt/logs" {
+		t.Errorf("LogsDir = %q", paths.LogsDir)
+	}
+	if paths.ManagedRoot != "/srv/hilt/.hilt/data/dotnet" {
 		t.Errorf("ManagedRoot = %q", paths.ManagedRoot)
 	}
-	if paths.InstallManifestFile() != "/tmp/data/hilt/installs.json" {
+	if paths.ConfigFile() != "/srv/hilt/.hilt/config.json" {
+		t.Errorf("ConfigFile = %q", paths.ConfigFile())
+	}
+	if paths.StateFile() != "/srv/hilt/.hilt/state.json" {
+		t.Errorf("StateFile = %q", paths.StateFile())
+	}
+	if paths.InstallManifestFile() != "/srv/hilt/.hilt/data/installs.json" {
 		t.Errorf("InstallManifestFile = %q", paths.InstallManifestFile())
 	}
-	if paths.InstallLockFile() != "/tmp/data/hilt/installs.lock" {
+	if paths.InstallLockFile() != "/srv/hilt/.hilt/data/installs.lock" {
 		t.Errorf("InstallLockFile = %q", paths.InstallLockFile())
+	}
+}
+
+func TestNewPathsDefaultHome(t *testing.T) {
+	paths := NewPaths(nil, "/home/user")
+	if paths.HomeDir != "/home/user/hilt" {
+		t.Errorf("HomeDir = %q", paths.HomeDir)
+	}
+	if paths.ProjectsRoot != "/home/user/hilt/apps" {
+		t.Errorf("ProjectsRoot = %q", paths.ProjectsRoot)
+	}
+	if paths.ConfigDir != "/home/user/hilt/.hilt" {
+		t.Errorf("ConfigDir = %q", paths.ConfigDir)
+	}
+	if paths.ManagedRoot != "/home/user/hilt/.hilt/data/dotnet" {
+		t.Errorf("ManagedRoot = %q", paths.ManagedRoot)
+	}
+}
+
+func TestNewPathsIgnoresRelativeOverride(t *testing.T) {
+	for _, value := range []string{"relative", "./relative", ""} {
+		paths := NewPaths(func(string) string { return value }, "/home/user")
+		if paths.HomeDir != "/home/user/hilt" {
+			t.Errorf("HILT_HOME=%q: HomeDir = %q", value, paths.HomeDir)
+		}
 	}
 }
 
 func TestNewPathsHomeFallback(t *testing.T) {
 	paths := NewPaths(nil, "")
-	if paths.ConfigDir == "" || paths.ManagedRoot == "" {
+	if paths.HomeDir == "" || paths.ConfigDir == "" || paths.ManagedRoot == "" {
 		t.Fatalf("paths should not be empty: %+v", paths)
 	}
 }

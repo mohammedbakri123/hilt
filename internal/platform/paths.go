@@ -4,18 +4,21 @@ import (
 	"path/filepath"
 )
 
-// Paths contains Hilt's XDG-aligned directories.
+// Paths contains Hilt's user-owned directory layout.
 type Paths struct {
-	ConfigDir   string `json:"configDir"`
-	StateDir    string `json:"stateDir"`
-	CacheDir    string `json:"cacheDir"`
-	DataDir     string `json:"dataDir"`
-	ManagedRoot string `json:"managedRoot"`
+	HomeDir      string `json:"homeDir"`
+	ProjectsRoot string `json:"projectsRoot"`
+	ConfigDir    string `json:"configDir"`
+	StateDir     string `json:"stateDir"`
+	CacheDir     string `json:"cacheDir"`
+	DataDir      string `json:"dataDir"`
+	LogsDir      string `json:"logsDir"`
+	ManagedRoot  string `json:"managedRoot"`
 }
 
-// NewPaths resolves XDG directories. Relative XDG values are ignored, matching
-// the specification. An empty home falls back to the current directory only so
-// that Hilt can still start and report the problem.
+// NewPaths resolves the single Hilt home. HILT_HOME wins when it is an absolute
+// path; otherwise the home directory is <home>/hilt. Relative overrides are
+// ignored so Hilt never scatters data relative to the working directory.
 func NewPaths(getenv func(string) string, home string) Paths {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
@@ -24,25 +27,25 @@ func NewPaths(getenv func(string) string, home string) Paths {
 		home = "."
 	}
 
-	config := xdgDir(getenv("XDG_CONFIG_HOME"), home, ".config")
-	state := xdgDir(getenv("XDG_STATE_HOME"), home, ".local/state")
-	cache := xdgDir(getenv("XDG_CACHE_HOME"), home, ".cache")
-	data := xdgDir(getenv("XDG_DATA_HOME"), home, ".local/share")
+	root := getenv("HILT_HOME")
+	if !filepath.IsAbs(root) {
+		root = filepath.Join(home, "hilt")
+	}
+	root = filepath.Clean(root)
+
+	hilt := filepath.Join(root, ".hilt")
+	data := filepath.Join(hilt, "data")
 
 	return Paths{
-		ConfigDir:   filepath.Join(config, "hilt"),
-		StateDir:    filepath.Join(state, "hilt"),
-		CacheDir:    filepath.Join(cache, "hilt"),
-		DataDir:     filepath.Join(data, "hilt"),
-		ManagedRoot: filepath.Join(data, "hilt", "dotnet"),
+		HomeDir:      root,
+		ProjectsRoot: filepath.Join(root, "apps"),
+		ConfigDir:    hilt,
+		StateDir:     hilt,
+		CacheDir:     filepath.Join(hilt, "cache"),
+		DataDir:      data,
+		LogsDir:      filepath.Join(hilt, "logs"),
+		ManagedRoot:  filepath.Join(data, "dotnet"),
 	}
-}
-
-func xdgDir(value, home, fallback string) string {
-	if filepath.IsAbs(value) {
-		return filepath.Clean(value)
-	}
-	return filepath.Join(home, filepath.FromSlash(fallback))
 }
 
 // ConfigFile is the main configuration path.

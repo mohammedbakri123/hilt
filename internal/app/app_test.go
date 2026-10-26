@@ -13,20 +13,24 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
-func TestNewUsesXDGPathsAndDefaults(t *testing.T) {
+func TestNewUsesHiltHomeAndDefaults(t *testing.T) {
 	home := t.TempDir()
+	hiltHome := filepath.Join(home, "custom-hilt")
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
-	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
-	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("HILT_HOME", hiltHome)
 
 	app := New("test-version")
 	if app.Version() != "test-version" {
 		t.Errorf("Version = %q", app.Version())
 	}
 	paths := app.Paths()
-	if paths.ConfigDir != filepath.Join(home, "cfg", "hilt") {
+	if paths.HomeDir != hiltHome {
+		t.Errorf("HomeDir = %q", paths.HomeDir)
+	}
+	if paths.ProjectsRoot != filepath.Join(hiltHome, "apps") {
+		t.Errorf("ProjectsRoot = %q", paths.ProjectsRoot)
+	}
+	if paths.ConfigDir != filepath.Join(hiltHome, ".hilt") {
 		t.Errorf("ConfigDir = %q", paths.ConfigDir)
 	}
 	if app.Config().ManagedRoot != paths.ManagedRoot {
@@ -42,7 +46,7 @@ func TestNewUsesXDGPathsAndDefaults(t *testing.T) {
 
 func TestNewSurfacesCorruptConfig(t *testing.T) {
 	home := t.TempDir()
-	configDir := filepath.Join(home, "hilt")
+	configDir := filepath.Join(home, "hilt", ".hilt")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +54,7 @@ func TestNewSurfacesCorruptConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("HILT_HOME", filepath.Join(home, "hilt"))
 
 	app := New("test")
 	if len(app.ConfigWarnings()) == 0 {
@@ -61,12 +64,12 @@ func TestNewSurfacesCorruptConfig(t *testing.T) {
 
 func TestNewDiscoversManifestManagedRoot(t *testing.T) {
 	home := t.TempDir()
-	dataDir := filepath.Join(home, "data")
+	hiltHome := filepath.Join(home, "hilt")
+	dataDir := filepath.Join(hiltHome, ".hilt", "data")
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_DATA_HOME", dataDir)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
+	t.Setenv("HILT_HOME", hiltHome)
 
-	managedRoot := filepath.Join(dataDir, "hilt", "dotnet")
+	managedRoot := filepath.Join(dataDir, "dotnet")
 	versionRoot := filepath.Join(managedRoot, "10.0.100")
 	if err := os.MkdirAll(filepath.Join(versionRoot, "sdk", "10.0.100"), 0o700); err != nil {
 		t.Fatal(err)
@@ -75,7 +78,7 @@ func TestNewDiscoversManifestManagedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	manifestPath := filepath.Join(dataDir, "hilt", "installs.json")
+	manifestPath := filepath.Join(dataDir, "installs.json")
 	manifest, err := install.Load(manifestPath, managedRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -114,12 +117,11 @@ func TestNewDiscoversManifestManagedRoot(t *testing.T) {
 
 func TestNewSurfacesCorruptInstallManifest(t *testing.T) {
 	home := t.TempDir()
-	dataDir := filepath.Join(home, "data")
+	hiltHome := filepath.Join(home, "hilt")
+	manifestDir := filepath.Join(hiltHome, ".hilt", "data")
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_DATA_HOME", dataDir)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
+	t.Setenv("HILT_HOME", hiltHome)
 
-	manifestDir := filepath.Join(dataDir, "hilt")
 	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -153,11 +155,10 @@ func TestToolResolution(t *testing.T) {
 func testAppEnv(t *testing.T) (string, string) {
 	t.Helper()
 	home := t.TempDir()
-	dataDir := filepath.Join(home, "data")
+	hiltHome := filepath.Join(home, "hilt")
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_DATA_HOME", dataDir)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
-	return home, filepath.Join(dataDir, "hilt", "dotnet")
+	t.Setenv("HILT_HOME", hiltHome)
+	return home, filepath.Join(hiltHome, ".hilt", "data", "dotnet")
 }
 
 func writeSDKRoot(t *testing.T, root, version string) {
@@ -289,10 +290,8 @@ func TestRemoveSDKNotInstalled(t *testing.T) {
 
 func TestScanProjectsUsesRootAndConfiguration(t *testing.T) {
 	home := t.TempDir()
-	dataDir := filepath.Join(home, "data")
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_DATA_HOME", dataDir)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
+	t.Setenv("HILT_HOME", filepath.Join(home, "hilt"))
 
 	projectDir := filepath.Join(home, "work")
 	if err := os.MkdirAll(projectDir, 0o700); err != nil {
