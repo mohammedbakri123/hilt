@@ -158,6 +158,12 @@ func (m Model) renderFooter(width int) string {
 		hints = []keyHint{{"esc", "cancel operation"}}
 	case m.loadingUpdates:
 		hints = []keyHint{{"esc", "cancel update check"}}
+	case m.prompt == promptInstallSDK:
+		if m.promptFocusInput {
+			hints = []keyHint{{"tab", "select"}, {"enter", "install"}, {"esc", "cancel"}}
+		} else {
+			hints = []keyHint{{"↑/↓", "select"}, {"enter", "install"}, {"tab", "type"}, {"esc", "cancel"}}
+		}
 	case m.prompt != promptNone:
 		hints = []keyHint{{"enter", "resolve"}, {"←/→", "framework"}, {"esc", "cancel"}}
 	case m.confirm != confirmNone:
@@ -577,8 +583,17 @@ func (m Model) managementLines(width int) []string {
 		if input == "" {
 			input = styleFaint.Render("latest, lts, or exact version")
 		}
-		content := []string{
-			styleLabel.Render("version") + "  " + input + styleAccent.Render("▌"),
+		label := styleLabel.Render("version")
+		cursor := ""
+		if m.prompt != promptInstallSDK || m.promptFocusInput {
+			cursor = styleAccent.Render("▌")
+		}
+		if m.prompt == promptInstallSDK && m.promptFocusInput {
+			label = styleAccent.Render("version")
+		}
+		content := []string{label + "  " + input + cursor}
+		if m.prompt == promptInstallSDK {
+			content = append(content, m.availableSDKPromptLines(width-4)...)
 		}
 		if m.prompt == promptInstallRuntime {
 			content = append(content, styleMuted.Render("framework "+string(m.promptFramework))+"   "+styleFaint.Render("←/→ change"))
@@ -606,6 +621,9 @@ func (m Model) managementLines(width int) []string {
 		content := []string{m.spinner.View() + " " + styleValue.Render(m.operationLabel)}
 		if m.operationCancelling {
 			content = append(content, "  "+styleWarning.Render("Cancelling..."))
+		}
+		if m.progressTotal > 0 || m.progressDone > 0 {
+			content = append(content, downloadProgressLine(m.progressDone, m.progressTotal, width-4))
 		}
 		start := 0
 		if len(m.progressLines) > 8 {
@@ -636,6 +654,97 @@ func (m Model) managementLines(width int) []string {
 				lines = append(lines, "      "+style.Render(line))
 			}
 		}
+	}
+	return lines
+}
+
+func downloadProgressLine(downloaded, total int64, width int) string {
+	if total <= 0 {
+		return styleMuted.Render(humanSize(downloaded) + " downloaded")
+	}
+	if downloaded > total {
+		downloaded = total
+	}
+	percent := int(downloaded * 100 / total)
+	label := fmt.Sprintf("%3d%%  %s / %s", percent, humanSize(downloaded), humanSize(total))
+	barWidth := width - lipgloss.Width(label) - 3
+	if barWidth < 4 {
+		return styleMuted.Render(label)
+	}
+	filled := int(int64(barWidth) * downloaded / total)
+	bar := styleOK.Render(strings.Repeat("█", filled)) + styleFaint.Render(strings.Repeat("░", barWidth-filled))
+	return "[" + bar + "] " + styleMuted.Render(label)
+}
+
+func humanSize(value int64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	div, exp := int64(unit), 0
+	for n := value / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(value)/float64(div), "KMGTPE"[exp])
+}
+
+func (m Model) availableSDKPromptLines(width int) []string {
+	if m.availableLoading {
+		return []string{styleMuted.Render(m.spinner.View() + " loading available SDKs...")}
+	}
+	if m.availableErr != nil {
+		lines := []string{styleError.Render("Could not load available SDKs.")}
+		for _, line := range wrap(m.availableErr.Error(), width) {
+			lines = append(lines, styleMuted.Render(line))
+		}
+		return lines
+	}
+
+	available := m.downloadableSDKs()
+	if len(available) == 0 {
+		message := "No downloadable SDKs were found for this platform."
+		if len(m.availableSDKs) > 0 {
+			message = "Every downloadable SDK for this platform is already installed."
+		}
+		return []string{"", styleMuted.Render(message)}
+	}
+
+	const visible = 6
+	start := 0
+	if m.availableCursor >= visible {
+		start = m.availableCursor - visible + 1
+	}
+	end := start + visible
+	if end > len(available) {
+		end = len(available)
+	}
+	suffix := styleFaint.Render("  ·  installed hidden")
+	lines := []string{
+		"",
+		styleLabel.Render(fmt.Sprintf("AVAILABLE  %d", len(available))) + suffix,
+	}
+	for index := start; index < end; index++ {
+		sdk := available[index]
+		marker := "  "
+		version := styleValue.Render(fmt.Sprintf("%-14s", sdk.Version))
+		if index == m.availableCursor && !m.promptFocusInput {
+			marker = styleAccent.Render("> ")
+			version = styleSelected.Render(fmt.Sprintf("%-14s", sdk.Version))
+		}
+		row := marker + version + " " + styleMuted.Render(fmt.Sprintf("%-5s", sdk.Channel)) + " " + styleMuted.Render(fmt.Sprintf("%-4s", sdk.ReleaseType))
+		if sdk.Latest {
+			row += " " + styleOK.Render("latest")
+		}
+		lines = append(lines, row)
+	}
+	if end < len(available) || start > 0 {
+		lines = append(lines, styleFaint.Render(fmt.Sprintf("  %d-%d of %d", start+1, end, len(available))))
+	}
+	if m.promptFocusInput {
+		lines = append(lines, styleFaint.Render("tab select from list · enter install"))
+	} else {
+		lines = append(lines, styleFaint.Render("↑/↓ select · enter install · tab type"))
 	}
 	return lines
 }

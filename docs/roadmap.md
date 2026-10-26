@@ -18,6 +18,9 @@ Implemented:
   `dotnet --info` with an explicit environment.
 - Atomic publish, idempotent installs, install locking, and cleanup on failure.
 - Managed-install manifest; removal only for manifest-owned roots.
+- `hilt sdk available` for browsing downloadable versions from 7.0 onward
+  across active, maintenance, and end-of-life channels, with installed versions
+  hidden by default in both the CLI and TUI. TUI downloads show a progress bar.
 - `hilt sdk install`, `hilt sdk remove`, and `hilt sdk outdated` with JSON
   output.
 - Explicit same-channel update checks; no automatic updates.

@@ -31,6 +31,9 @@ type fakeBackend struct {
 	removeErr         error
 	updates           []install.Update
 	updatesErr        error
+	available         []install.AvailableSDK
+	availableErr      error
+	availableRequests *[]bool
 	updateResult      install.UpdateResult
 	updateErr         error
 	runtimePlan       install.RuntimePlan
@@ -71,6 +74,12 @@ func (f fakeBackend) RemoveSDK(context.Context, string) (install.Removal, error)
 }
 func (f fakeBackend) CheckSDKUpdates(context.Context) ([]install.Update, error) {
 	return f.updates, f.updatesErr
+}
+func (f fakeBackend) AvailableSDKs(_ context.Context, allowPrerelease bool) ([]install.AvailableSDK, error) {
+	if f.availableRequests != nil {
+		*f.availableRequests = append(*f.availableRequests, allowPrerelease)
+	}
+	return f.available, f.availableErr
 }
 func (f fakeBackend) UpdateSDK(_ context.Context, _ string, _ bool, progress io.Writer) (install.UpdateResult, error) {
 	if progress != nil {
@@ -293,6 +302,64 @@ func TestSDKListJSON(t *testing.T) {
 	}
 	if len(payload.Warnings) != 1 {
 		t.Errorf("warnings = %v, want 1", payload.Warnings)
+	}
+}
+
+func TestSDKAvailableHidesInstalledByDefault(t *testing.T) {
+	backend := populatedBackend()
+	backend.available = []install.AvailableSDK{
+		{Version: "10.0.112", Channel: "10.0", SupportPhase: "active", ReleaseType: "lts", Latest: true},
+		{Version: "9.0.404", Channel: "9.0", SupportPhase: "active", ReleaseType: "sts", Latest: true},
+		{Version: "9.0.300", Channel: "9.0", SupportPhase: "active", ReleaseType: "sts"},
+		{Version: "8.0.400", Channel: "8.0", SupportPhase: "active", ReleaseType: "lts", Latest: true},
+	}
+
+	human := run(t, []string{"sdk", "available"}, backend, false, nil)
+	if human.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", human.code, human.stderr)
+	}
+	if strings.Contains(human.stdout, "10.0.112") || strings.Contains(human.stdout, "9.0.300") {
+		t.Fatalf("installed SDKs were listed: %q", human.stdout)
+	}
+	for _, want := range []string{"9.0.404", "8.0.400", "VERSION", "CHANNEL", "LATEST"} {
+		if !strings.Contains(human.stdout, want) {
+			t.Errorf("output missing %q: %q", want, human.stdout)
+		}
+	}
+
+	all := run(t, []string{"sdk", "available", "--all"}, backend, false, nil)
+	if all.code != 0 || !strings.Contains(all.stdout, "10.0.112") || !strings.Contains(all.stdout, "9.0.300") {
+		t.Fatalf("--all did not include installed SDKs: code=%d output=%q", all.code, all.stdout)
+	}
+
+	machine := run(t, []string{"sdk", "available", "--json"}, backend, false, nil)
+	var payload struct {
+		SchemaVersion int                    `json:"schemaVersion"`
+		SDKs          []install.AvailableSDK `json:"sdks"`
+	}
+	if err := json.Unmarshal([]byte(machine.stdout), &payload); err != nil {
+		t.Fatalf("invalid available JSON: %v\n%s", err, machine.stdout)
+	}
+	if payload.SchemaVersion != 1 || len(payload.SDKs) != 2 {
+		t.Fatalf("unexpected available payload: %+v", payload)
+	}
+
+	calls := []bool{}
+	backend.availableRequests = &calls
+	prerelease := run(t, []string{"sdk", "available", "--prerelease"}, backend, false, nil)
+	if prerelease.code != 0 {
+		t.Fatalf("prerelease exit = %d (%s)", prerelease.code, prerelease.stderr)
+	}
+	if len(calls) != 1 || !calls[0] {
+		t.Fatalf("available calls = %v, want prerelease=true", calls)
+	}
+}
+
+func TestSDKAvailableFailure(t *testing.T) {
+	backend := fakeBackend{availableErr: errors.New("metadata unavailable")}
+	result := run(t, []string{"sdk", "available"}, backend, false, nil)
+	if result.code != 1 || !strings.Contains(result.stderr, "metadata unavailable") {
+		t.Fatalf("exit=%d stderr=%q", result.code, result.stderr)
 	}
 }
 

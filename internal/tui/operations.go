@@ -58,13 +58,14 @@ const (
 type operationKind string
 
 const (
-	opInstallSDK      operationKind = "install-sdk"
-	opInstallRuntime  operationKind = "install-runtime"
-	opRemoveSDK       operationKind = "remove-sdk"
-	opRemoveRuntime   operationKind = "remove-runtime"
-	opUpdateSDK       operationKind = "update-sdk"
-	opUpdateRuntime   operationKind = "update-runtime"
-	updateCheckPeriod               = 45 * time.Second
+	opInstallSDK       operationKind = "install-sdk"
+	opInstallRuntime   operationKind = "install-runtime"
+	opRemoveSDK        operationKind = "remove-sdk"
+	opRemoveRuntime    operationKind = "remove-runtime"
+	opUpdateSDK        operationKind = "update-sdk"
+	opUpdateRuntime    operationKind = "update-runtime"
+	updateCheckPeriod                = 45 * time.Second
+	availableSDKPeriod               = 180 * time.Second
 )
 
 type sdkPlanMsg struct {
@@ -94,13 +95,29 @@ type updatesMsg struct {
 	err     error
 }
 
+type availableSDKsMsg struct {
+	request int
+	sdks    []install.AvailableSDK
+	err     error
+}
+
 type progressMsg struct {
-	line string
+	line        string
+	downloaded  int64
+	total       int64
+	hasProgress bool
 }
 
 // progressWriter forwards operation progress lines to the TUI event loop.
 type progressWriter struct {
 	ch chan<- tea.Msg
+}
+
+func (w progressWriter) ReportProgress(downloaded, total int64) {
+	if total < 0 {
+		total = 0
+	}
+	w.ch <- progressMsg{downloaded: downloaded, total: total, hasProgress: true}
 }
 
 func (w progressWriter) Write(data []byte) (int, error) {
@@ -196,6 +213,14 @@ func (m Model) updateRuntimeCmd(ctx context.Context, update install.Update, fram
 	}
 }
 
+func (m Model) availableSDKsCmd(ctx context.Context, request int) tea.Cmd {
+	backend := m.backend
+	return func() tea.Msg {
+		sdks, err := backend.AvailableSDKs(ctx, false)
+		return availableSDKsMsg{request: request, sdks: sdks, err: err}
+	}
+}
+
 func (m Model) updatesCmd(ctx context.Context) tea.Cmd {
 	backend := m.backend
 	return func() tea.Msg {
@@ -216,6 +241,8 @@ func (m *Model) startOperation(label string, cancel context.CancelFunc) {
 	m.operationCancel = cancel
 	m.operationErr = nil
 	m.progressLines = nil
+	m.progressDone = 0
+	m.progressTotal = 0
 	m.statusMessage = ""
 	m.statusIsError = false
 }
@@ -228,12 +255,16 @@ func (m *Model) finishOperation() {
 	m.operationCancelling = false
 	m.operationCancel = nil
 	m.progressCh = nil
+	m.progressDone = 0
+	m.progressTotal = 0
 	m.operationErr = nil
 }
 
 func (m *Model) clearPrompt() {
+	m.cancelAvailableSDKs()
 	m.prompt = promptNone
 	m.promptInput = ""
+	m.promptFocusInput = false
 	m.promptFramework = install.FrameworkAll
 }
 
@@ -252,23 +283,101 @@ func (m *Model) setStatus(message string, isError bool) {
 	m.statusIsError = isError
 }
 
-func (m *Model) startSDKPrompt() {
+func (m *Model) startSDKPrompt() tea.Cmd {
 	m.screen = ScreenSDKs
 	m.cursor = int(ScreenSDKs)
 	m.sdkFocus = focusSDKs
 	m.prompt = promptInstallSDK
 	m.promptInput = ""
+	m.promptFocusInput = false
+	m.promptFramework = install.FrameworkAll
+	m.clearConfirm()
+	m.setStatus("", false)
+	return m.loadAvailableSDKs()
+}
+
+func (m *Model) loadAvailableSDKs() tea.Cmd {
+	m.cancelAvailableSDKs()
+	m.availableRequest++
+	request := m.availableRequest
+	m.availableSDKs = nil
+	m.availableCursor = 0
+	m.availableErr = nil
+	m.availableLoading = true
+	ctx, cancel := context.WithTimeout(context.Background(), availableSDKPeriod)
+	m.availableCancel = cancel
+	return m.availableSDKsCmd(ctx, request)
+}
+
+func (m *Model) startRuntimePrompt() {
+	m.cancelAvailableSDKs()
+	m.prompt = promptInstallRuntime
+	m.promptInput = ""
+	m.promptFocusInput = true
 	m.promptFramework = install.FrameworkAll
 	m.clearConfirm()
 	m.setStatus("", false)
 }
 
-func (m *Model) startRuntimePrompt() {
-	m.prompt = promptInstallRuntime
-	m.promptInput = ""
-	m.promptFramework = install.FrameworkAll
-	m.clearConfirm()
-	m.setStatus("", false)
+func (m *Model) cancelAvailableSDKs() {
+	if m.availableCancel != nil {
+		m.availableCancel()
+		m.availableCancel = nil
+	}
+	m.availableLoading = false
+	m.availableRequest++
+}
+
+func (m Model) downloadableSDKs() []install.AvailableSDK {
+	if len(m.availableSDKs) == 0 {
+		return nil
+	}
+	installed := make(map[string]bool)
+	if m.inventory != nil {
+		for _, sdk := range m.inventory.SDKs {
+			installed[sdk.Version] = true
+		}
+	}
+	available := make([]install.AvailableSDK, 0, len(m.availableSDKs))
+	for _, sdk := range m.availableSDKs {
+		if installed[sdk.Version] {
+			continue
+		}
+		available = append(available, sdk)
+	}
+	return available
+}
+
+func (m Model) selectedAvailableSDK() (install.AvailableSDK, bool) {
+	available := m.downloadableSDKs()
+	if len(available) == 0 || m.availableCursor < 0 || m.availableCursor >= len(available) {
+		return install.AvailableSDK{}, false
+	}
+	return available[m.availableCursor], true
+}
+
+func (m *Model) clampAvailableCursor() {
+	available := m.downloadableSDKs()
+	if len(available) == 0 {
+		m.availableCursor = 0
+		return
+	}
+	if m.availableCursor < 0 {
+		m.availableCursor = 0
+	}
+	if m.availableCursor >= len(available) {
+		m.availableCursor = len(available) - 1
+	}
+}
+
+func (m *Model) moveAvailable(delta int) {
+	m.clampAvailableCursor()
+	available := m.downloadableSDKs()
+	if len(available) == 0 {
+		return
+	}
+	m.availableCursor += delta
+	m.clampAvailableCursor()
 }
 
 func (m *Model) submitPrompt() tea.Cmd {

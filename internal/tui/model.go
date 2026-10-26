@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -36,6 +37,7 @@ type Backend interface {
 	RemoveSDK(ctx context.Context, version string) (install.Removal, error)
 	UpdateSDK(ctx context.Context, version string, removeOld bool, progress io.Writer) (install.UpdateResult, error)
 	CheckSDKUpdates(ctx context.Context) ([]install.Update, error)
+	AvailableSDKs(ctx context.Context, allowPrerelease bool) ([]install.AvailableSDK, error)
 
 	PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor, allowPrerelease bool) (install.RuntimePlan, error)
 	InstallRuntime(ctx context.Context, plan install.RuntimePlan, progress io.Writer) (install.RuntimeResult, error)
@@ -119,9 +121,17 @@ type Model struct {
 	sdkCursor     int
 	runtimeCursor int
 
-	prompt          promptKind
-	promptInput     string
-	promptFramework install.FrameworkFlavor
+	prompt           promptKind
+	promptInput      string
+	promptFocusInput bool
+	promptFramework  install.FrameworkFlavor
+
+	availableSDKs    []install.AvailableSDK
+	availableCursor  int
+	availableLoading bool
+	availableErr     error
+	availableCancel  context.CancelFunc
+	availableRequest int
 
 	confirm        confirmKind
 	confirmSummary []string
@@ -139,6 +149,8 @@ type Model struct {
 	operationErr        error
 	progressCh          chan tea.Msg
 	progressLines       []string
+	progressDone        int64
+	progressTotal       int64
 
 	updates        []install.Update
 	runtimeUpdates []install.Update
@@ -232,7 +244,27 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectionErr = message.selectionErr
 		}
 		m.clampSelection()
+		m.clampAvailableCursor()
 		m.clampScroll()
+		return m, nil
+
+	case availableSDKsMsg:
+		if message.request != m.availableRequest || m.prompt != promptInstallSDK {
+			return m, nil
+		}
+		m.cancelAvailableSDKs()
+		m.availableLoading = false
+		if message.err != nil {
+			if errors.Is(message.err, context.Canceled) {
+				return m, nil
+			}
+			m.availableErr = message.err
+			return m, nil
+		}
+		m.availableErr = nil
+		m.availableSDKs = message.sdks
+		m.availableCursor = 0
+		m.clampAvailableCursor()
 		return m, nil
 
 	case sdkPlanMsg:
@@ -262,9 +294,18 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case progressMsg:
-		m.progressLines = append(m.progressLines, message.line)
-		if len(m.progressLines) > 200 {
-			m.progressLines = m.progressLines[len(m.progressLines)-200:]
+		if message.hasProgress {
+			m.progressDone = message.downloaded
+			m.progressTotal = message.total
+		} else {
+			if strings.HasPrefix(message.line, "Downloading ") || strings.HasPrefix(message.line, "Retrying ") {
+				m.progressDone = 0
+				m.progressTotal = 0
+			}
+			m.progressLines = append(m.progressLines, message.line)
+			if len(m.progressLines) > 200 {
+				m.progressLines = m.progressLines[len(m.progressLines)-200:]
+			}
 		}
 		if m.progressCh == nil {
 			return m, nil
@@ -444,10 +485,9 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "i":
 			if m.sdkFocus == focusRuntimes {
 				m.startRuntimePrompt()
-			} else {
-				m.startSDKPrompt()
+				return m, nil
 			}
-			return m, nil
+			return m, m.startSDKPrompt()
 		case "x":
 			m.beginRemove()
 			return m, nil
@@ -460,8 +500,7 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.screen == ScreenDashboard && key == "i" {
-		m.startSDKPrompt()
-		return m, nil
+		return m, m.startSDKPrompt()
 	}
 
 	switch key {
@@ -498,7 +537,86 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handlePromptKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch message.String() {
+	key := message.String()
+	if m.prompt == promptInstallSDK {
+		switch key {
+		case "esc", "ctrl+c":
+			m.clearPrompt()
+			m.setStatus("Install cancelled.", false)
+			return m, nil
+		case "tab":
+			m.promptFocusInput = !m.promptFocusInput
+			return m, nil
+		case "up", "k":
+			if !m.promptFocusInput {
+				m.moveAvailable(-1)
+			}
+			return m, nil
+		case "down", "j":
+			if !m.promptFocusInput {
+				m.moveAvailable(1)
+			}
+			return m, nil
+		case "pgup":
+			if !m.promptFocusInput {
+				m.moveAvailable(-6)
+			}
+			return m, nil
+		case "pgdown":
+			if !m.promptFocusInput {
+				m.moveAvailable(6)
+			}
+			return m, nil
+		case "ctrl+u":
+			if m.promptFocusInput {
+				m.promptInput = ""
+			} else {
+				m.moveAvailable(-6)
+			}
+			return m, nil
+		case "ctrl+d":
+			if !m.promptFocusInput {
+				m.moveAvailable(6)
+			}
+			return m, nil
+		case "home":
+			if !m.promptFocusInput {
+				m.availableCursor = 0
+			}
+			return m, nil
+		case "end":
+			if !m.promptFocusInput {
+				if available := m.downloadableSDKs(); len(available) > 0 {
+					m.availableCursor = len(available) - 1
+				}
+			}
+			return m, nil
+		case "enter":
+			if m.promptFocusInput {
+				return m, m.submitPrompt()
+			}
+			sdk, ok := m.selectedAvailableSDK()
+			if !ok {
+				m.setStatus("No downloadable SDK is selected. Press tab to type a version.", true)
+				return m, nil
+			}
+			m.promptInput = sdk.Version
+			return m, m.submitPrompt()
+		case "backspace", "ctrl+h":
+			if m.promptInput != "" {
+				runes := []rune(m.promptInput)
+				m.promptInput = string(runes[:len(runes)-1])
+			}
+			return m, nil
+		}
+		if message.Text != "" && message.Mod&tea.ModCtrl == 0 && message.Mod&tea.ModAlt == 0 {
+			m.promptFocusInput = true
+			m.promptInput += message.Text
+		}
+		return m, nil
+	}
+
+	switch key {
 	case "esc", "ctrl+c":
 		m.clearPrompt()
 		m.setStatus("Install cancelled.", false)

@@ -31,6 +31,7 @@ type Backend interface {
 	InstallSDK(ctx context.Context, plan install.Plan, progress io.Writer) (install.Result, error)
 	RemoveSDK(ctx context.Context, version string) (install.Removal, error)
 	CheckSDKUpdates(ctx context.Context) ([]install.Update, error)
+	AvailableSDKs(ctx context.Context, allowPrerelease bool) ([]install.AvailableSDK, error)
 	UpdateSDK(ctx context.Context, version string, removeOld bool, progress io.Writer) (install.UpdateResult, error)
 	PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor, allowPrerelease bool) (install.RuntimePlan, error)
 	InstallRuntime(ctx context.Context, plan install.RuntimePlan, progress io.Writer) (install.RuntimeResult, error)
@@ -268,11 +269,75 @@ func newSDKCommand(options Options) *cobra.Command {
 	}
 	command.AddCommand(newInventoryListCommand(options, inventorySDKs, "list", "List installed .NET SDKs"))
 	command.AddCommand(newSDKWhichCommand(options))
+	command.AddCommand(newSDKAvailableCommand(options))
 	command.AddCommand(newSDKInstallCommand(options))
 	command.AddCommand(newSDKRemoveCommand(options))
 	command.AddCommand(newSDKOutdatedCommand(options))
 	command.AddCommand(newSDKUpdateCommand(options))
 	return command
+}
+
+func newSDKAvailableCommand(options Options) *cobra.Command {
+	var asJSON bool
+	var allowPrerelease bool
+	var includeInstalled bool
+	command := &cobra.Command{
+		Use:   "available",
+		Short: "List downloadable .NET SDKs",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.Context().Err(); err != nil {
+				return &exitError{code: 130, err: err}
+			}
+			available, err := options.Backend.AvailableSDKs(cmd.Context(), allowPrerelease)
+			if err != nil {
+				if cmd.Context().Err() != nil {
+					return &exitError{code: 130, err: err}
+				}
+				return failure(err)
+			}
+			if !includeInstalled {
+				inventory, inventoryErr := options.Backend.Inventory(cmd.Context())
+				if inventoryErr != nil {
+					if cmd.Context().Err() != nil {
+						return &exitError{code: 130, err: inventoryErr}
+					}
+					return failure(inventoryErr)
+				}
+				available = filterInstalledSDKs(available, inventory)
+			}
+			if available == nil {
+				available = []install.AvailableSDK{}
+			}
+			if asJSON {
+				return writeJSON(options.Out, struct {
+					SchemaVersion int                    `json:"schemaVersion"`
+					SDKs          []install.AvailableSDK `json:"sdks"`
+				}{SchemaVersion: schemaVersion, SDKs: available})
+			}
+			printAvailableSDKs(options.Out, available)
+			return nil
+		},
+	}
+	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
+	command.Flags().BoolVar(&allowPrerelease, "prerelease", false, "include prerelease SDKs")
+	command.Flags().BoolVar(&includeInstalled, "all", false, "include versions already installed")
+	return command
+}
+
+func filterInstalledSDKs(available []install.AvailableSDK, inventory dotnet.Inventory) []install.AvailableSDK {
+	installed := make(map[string]bool, len(inventory.SDKs))
+	for _, sdk := range inventory.SDKs {
+		installed[sdk.Version] = true
+	}
+	filtered := make([]install.AvailableSDK, 0, len(available))
+	for _, sdk := range available {
+		if installed[sdk.Version] {
+			continue
+		}
+		filtered = append(filtered, sdk)
+	}
+	return filtered
 }
 
 func newSDKInstallCommand(options Options) *cobra.Command {

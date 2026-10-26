@@ -217,6 +217,16 @@ func (i Installer) planVersion(ctx context.Context, canonical, requested string,
 	}, nil
 }
 
+// AvailableSDKs lists SDK versions that can be downloaded for the host runtime
+// identifier. It performs no downloads and does not inspect the manifest.
+func (i Installer) AvailableSDKs(ctx context.Context, allowPrerelease bool) ([]AvailableSDK, error) {
+	rid, err := CurrentRID()
+	if err != nil {
+		return nil, err
+	}
+	return i.metadata().AvailableSDKs(ctx, rid, allowPrerelease)
+}
+
 // Update reports whether a managed SDK has a newer stable version in its
 // release channel.
 type Update struct {
@@ -744,10 +754,18 @@ func (i Installer) downloadOne(ctx context.Context, rawURL string, expected []by
 	}
 
 	progressf(progress, "Downloading %s", target.Redacted())
+	reporter, _ := progress.(downloadProgressReporter)
+	body := io.Reader(response.Body)
+	if reporter != nil {
+		body = &downloadProgressReader{reader: response.Body, total: response.ContentLength, report: reporter.ReportProgress}
+	}
 	hasher := sha512.New()
-	written, err := io.Copy(io.MultiWriter(file, hasher), io.LimitReader(response.Body, limit+1))
+	written, err := io.Copy(io.MultiWriter(file, hasher), io.LimitReader(body, limit+1))
 	if err != nil {
 		return "", fmt.Errorf("download %s archive: %w", label, err)
+	}
+	if reporter != nil {
+		reporter.ReportProgress(written, response.ContentLength)
 	}
 	if written > limit {
 		return "", fmt.Errorf("%s archive exceeds %d bytes", label, limit)
@@ -965,6 +983,31 @@ func resultFromEntry(entry Entry, root string, systemCopy bool) Result {
 		InstalledAt: entry.InstalledAt,
 		SystemCopy:  systemCopy,
 	}
+}
+
+type downloadProgressReporter interface {
+	ReportProgress(downloaded, total int64)
+}
+
+type downloadProgressReader struct {
+	reader  io.Reader
+	total   int64
+	written int64
+	last    time.Time
+	report  func(downloaded, total int64)
+}
+
+func (r *downloadProgressReader) Read(data []byte) (int, error) {
+	read, err := r.reader.Read(data)
+	r.written += int64(read)
+	if r.report != nil {
+		now := time.Now()
+		if (r.total > 0 && r.written >= r.total) || now.Sub(r.last) >= 100*time.Millisecond {
+			r.last = now
+			r.report(r.written, r.total)
+		}
+	}
+	return read, err
 }
 
 func progressf(writer io.Writer, format string, args ...any) {

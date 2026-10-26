@@ -174,6 +174,12 @@ func (a *App) CheckSDKUpdates(ctx context.Context) ([]install.Update, error) {
 	return a.installer().CheckUpdates(ctx)
 }
 
+// AvailableSDKs lists downloadable SDK versions for this host. It performs no
+// downloads or filesystem changes.
+func (a *App) AvailableSDKs(ctx context.Context, allowPrerelease bool) ([]install.AvailableSDK, error) {
+	return a.installer().AvailableSDKs(ctx, allowPrerelease)
+}
+
 // UpdateSDK applies a managed SDK update.
 func (a *App) UpdateSDK(ctx context.Context, version string, removeOld bool, progress io.Writer) (install.UpdateResult, error) {
 	result, err := a.installer().UpdateSDK(ctx, version, removeOld, progress)

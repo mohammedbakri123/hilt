@@ -56,6 +56,12 @@ Hilt installs .NET runtime archives into the managed root alongside SDKs.
 the runtime (and ASP.NET Core runtime when requested), verifies both, and
 publishes them atomically. Runtimes are verified with `dotnet --list-runtimes`.
 
+## Managed SDK discovery
+
+`hilt sdk available` and the TUI install picker read official Microsoft release
+metadata. They perform no downloads and make no filesystem changes; installed
+versions are hidden by default.
+
 ## Managed SDK updates
 
 `hilt sdk update <version> [--remove-old]` installs the newest stable SDK in

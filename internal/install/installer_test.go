@@ -131,6 +131,43 @@ func testInstaller(t *testing.T, server *installServer, runner process.Runner) I
 	}
 }
 
+type downloadProgress struct {
+	downloaded int64
+	total      int64
+}
+
+type progressRecorder struct {
+	bytes.Buffer
+	updates []downloadProgress
+}
+
+func (r *progressRecorder) ReportProgress(downloaded, total int64) {
+	r.updates = append(r.updates, downloadProgress{downloaded: downloaded, total: total})
+}
+
+func TestDownloadReportsStructuredProgress(t *testing.T) {
+	archive := []byte("archive contents")
+	server := newInstallServer(t, "10.0.100", "linux-x64", archive, "")
+	defer server.Close()
+	installer := testInstaller(t, server, &fakeRunner{})
+	hash := sha512.Sum512(archive)
+	progress := &progressRecorder{}
+
+	if _, err := installer.downloadOne(context.Background(), server.URL+"/archive.tar.gz", hash[:], t.TempDir(), progress, "SDK"); err != nil {
+		t.Fatal(err)
+	}
+	if len(progress.updates) == 0 {
+		t.Fatal("no structured progress updates were reported")
+	}
+	last := progress.updates[len(progress.updates)-1]
+	if last.downloaded != int64(len(archive)) || last.total != int64(len(archive)) {
+		t.Fatalf("last progress = %+v, want %d/%d", last, len(archive), len(archive))
+	}
+	if !strings.Contains(progress.String(), "Downloading ") {
+		t.Errorf("line progress missing: %q", progress.String())
+	}
+}
+
 func TestInstallerPlanInstallAndIdempotency(t *testing.T) {
 	archivePath := writeTarGz(t, []archiveEntry{
 		{name: "dotnet", body: "#!/bin/sh\n", mode: 0o755, typeflag: tar.TypeReg},

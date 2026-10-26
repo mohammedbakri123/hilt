@@ -155,6 +155,25 @@ func printSelection(writer io.Writer, selection dotnet.Selection) {
 	}
 }
 
+func printAvailableSDKs(writer io.Writer, available []install.AvailableSDK) {
+	if len(available) == 0 {
+		fmt.Fprintln(writer, "No downloadable .NET SDKs found.")
+		return
+	}
+	table := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(table, "VERSION\tCHANNEL\tTYPE\tSUPPORT\tLATEST")
+	for _, sdk := range available {
+		latest := ""
+		if sdk.Latest {
+			latest = "yes"
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n",
+			sdk.Version, sdk.Channel, valueOr(sdk.ReleaseType, "unknown"),
+			valueOr(sdk.SupportPhase, "unknown"), latest)
+	}
+	_ = table.Flush()
+}
+
 func printInstallPlan(writer io.Writer, plan install.Plan) {
 	if plan.AlreadyInstalled {
 		fmt.Fprintln(writer, "Managed .NET SDK already installed")

@@ -198,6 +198,111 @@ func TestLatestSDKMissingStableVersion(t *testing.T) {
 	}
 }
 
+func TestAvailableSDKsFiltersInstalledCandidatesForRID(t *testing.T) {
+	hash := strings.Repeat("a", 128)
+	index := `{"releases-index":[
+		{"channel-version":"11.0","latest-sdk":"11.0.100-rc.1","support-phase":"go-live","release-type":"sts"},
+		{"channel-version":"10.0","latest-sdk":"10.0.112","support-phase":"active","release-type":"lts"},
+		{"channel-version":"9.0","latest-sdk":"9.0.300","support-phase":"maintenance","release-type":"sts"},
+		{"channel-version":"8.0","latest-sdk":"8.0.100","support-phase":"eol","release-type":"lts"}
+	]}`
+	archive := func(version, rid string) string {
+		return fmt.Sprintf(`{"name":"dotnet-sdk-%s-%s.tar.gz","rid":%q,"url":"https://a.microsoft.com/%s.tar.gz","hash":"%s"}`, version, rid, rid, version, hash)
+	}
+	channels := map[string]string{
+		"/10.0/releases.json": fmt.Sprintf(`{"releases":[
+			{"sdk":{"version":"10.0.112","files":[%s]}},
+			{"sdks":[
+				{"version":"10.0.111","files":[%s]},
+				{"version":"10.0.113-rc.1","files":[%s]},
+				{"version":"10.0.110","files":[{"name":"dotnet-sdk-10.0.110-linux-x64.zip","rid":"linux-x64","url":"https://a.microsoft.com/10.0.110.zip","hash":"%s"}]}
+			]}
+		]}`, archive("10.0.112", "linux-x64"), archive("10.0.111", "linux-x64"), archive("10.0.113-rc.1", "linux-x64"), hash),
+		"/9.0/releases.json":  fmt.Sprintf(`{"releases":[{"sdk":{"version":"9.0.300","files":[%s]}}]}`, archive("9.0.300", "linux-x64")),
+		"/8.0/releases.json":  fmt.Sprintf(`{"releases":[{"sdk":{"version":"8.0.100","files":[%s]}}]}`, archive("8.0.100", "linux-x64")),
+		"/11.0/releases.json": fmt.Sprintf(`{"releases":[{"sdk":{"version":"11.0.100-rc.1","files":[%s]}}]}`, archive("11.0.100-rc.1", "linux-x64")),
+	}
+	server := newRequestServer(t, index, channels)
+	defer server.Close()
+	client := newRequestClient(server)
+
+	available, err := client.AvailableSDKs(context.Background(), "linux-x64", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(available) != 4 {
+		t.Fatalf("available = %+v, want 4 stable SDKs", available)
+	}
+	for index, want := range []struct {
+		version string
+		latest  bool
+	}{
+		{"10.0.112", true},
+		{"10.0.111", false},
+		{"9.0.300", true},
+		{"8.0.100", true},
+	} {
+		got := available[index]
+		if got.Version != want.version || got.Latest != want.latest {
+			t.Errorf("available[%d] = %+v, want version %s latest=%v", index, got, want.version, want.latest)
+		}
+		if got.Channel == "" || got.ReleaseType == "" || got.SupportPhase == "" {
+			t.Errorf("available[%d] missing channel metadata: %+v", index, got)
+		}
+	}
+	for _, sdk := range available {
+		if sdk.Version == "10.0.110" {
+			t.Error("zip-only SDK was listed")
+		}
+		if strings.HasPrefix(sdk.Version, "11.") {
+			t.Errorf("prerelease channel leaked into stable list: %+v", sdk)
+		}
+	}
+
+	withPrerelease, err := client.AvailableSDKs(context.Background(), "linux-x64", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withPrerelease) != 6 {
+		t.Fatalf("available with prerelease = %+v, want 6 SDKs", withPrerelease)
+	}
+	if withPrerelease[0].Version != "11.0.100-rc.1" || !withPrerelease[0].Latest {
+		t.Errorf("newest prerelease = %+v", withPrerelease[0])
+	}
+
+	arm64, err := client.AvailableSDKs(context.Background(), "linux-arm64", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(arm64) != 0 {
+		t.Fatalf("arm64 available = %+v, want no x64 archives", arm64)
+	}
+
+}
+
+func TestAvailableSDKsFallsBackToLatestWhenChannelMetadataFails(t *testing.T) {
+	index := `{"releases-index":[
+		{"channel-version":"9.0","latest-sdk":"9.0.300","support-phase":"maintenance","release-type":"sts"},
+		{"channel-version":"8.0","latest-sdk":"8.0.400","support-phase":"maintenance","release-type":"lts"}
+	]}`
+	server := newRequestServer(t, index, map[string]string{})
+	defer server.Close()
+	client := newRequestClient(server)
+
+	available, err := client.AvailableSDKs(context.Background(), "linux-x64", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(available) != 2 {
+		t.Fatalf("available = %+v, want index fallbacks", available)
+	}
+	for index, want := range []string{"9.0.300", "8.0.400"} {
+		if available[index].Version != want || !available[index].Latest {
+			t.Errorf("available[%d] = %+v, want %s latest", index, available[index], want)
+		}
+	}
+}
+
 func TestResolveRuntime(t *testing.T) {
 	hash := sha512.Sum512([]byte("runtime archive"))
 	var server *httptest.Server

@@ -21,6 +21,9 @@ Phase 1 provides:
 
 Phase 2 managed SDKs provide:
 
+- `hilt sdk available` lists downloadable stable SDKs for the host platform
+  from 7.0 onward, including maintenance and end-of-life channels; installed
+  versions are hidden unless `--all` is passed.
 - `hilt sdk install <version>` from official Microsoft release metadata.
 - SHA-512 verification, archive limits, staging, and verification through the
   installed `dotnet`.
@@ -73,6 +76,9 @@ bin/hilt sdk list
 bin/hilt sdk list --json
 bin/hilt sdk which
 bin/hilt sdk which --json
+bin/hilt sdk available
+bin/hilt sdk available --all --prerelease
+bin/hilt sdk available --json
 bin/hilt sdk install <version>
 bin/hilt sdk install <version> --json
 bin/hilt sdk remove <version>
@@ -97,6 +103,13 @@ manifest and lock live beside that directory at
 `<data>/hilt/installs.json` and `<data>/hilt/installs.lock`. Removal requires
 both a managed path and manifest ownership. An SDK copied into the managed root
 by hand is reported but cannot be removed by Hilt.
+
+`hilt sdk available` reads official Microsoft release metadata and lists every
+stable patch version for the host RID from .NET 7.0 onward, newest first.
+Maintenance and end-of-life channels are included. Versions already present in
+the inventory are hidden by default; `--all` includes them and `--prerelease`
+adds prerelease versions. It does not download or install anything. In the TUI
+picker, downloads show a progress bar.
 
 `hilt sdk outdated` checks the newest stable SDK in the same `major.minor`
 release channel as each managed installation. It reports results only; it does

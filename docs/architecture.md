@@ -59,9 +59,11 @@ cmd/hilt
    loop. Missing .NET is represented as an empty inventory plus warnings.
 5. Diagnostics reuses the inventory and adds configuration, `global.json`,
    package-manager, git, and managed-root findings.
-6. `hilt sdk install` resolves metadata, downloads and verifies an archive,
-   stages and verifies the toolchain, publishes it atomically, then records it
-   in the manifest. `hilt sdk remove` reverses that only for manifest-owned
+6. `hilt sdk available` reads the release index and channel metadata to list
+   downloadable versions from 7.0 onward for the host RID, including
+   maintenance and end-of-life channels. `hilt sdk install` resolves
+   metadata, downloads and verifies an archive, stages and verifies the
+   toolchain, publishes it atomically, then records it in the manifest. `hilt sdk remove` reverses that only for manifest-owned
    roots. `hilt sdk outdated` reads metadata and reports newer same-channel
    stable versions. `hilt sdk update` and `hilt runtime install/remove/outdated`
    extend the same install flow. The TUI runs these same backend operations from

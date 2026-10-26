@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -35,9 +36,29 @@ var metadataBaseURLCandidates = []string{
 	"https://builds.dotnet.microsoft.com/dotnet/release-metadata",
 }
 
-// metadataMirrorTimeout bounds each mirror attempt so one unreachable host
-// cannot stall resolution for the whole timeout budget.
+// metadataMirrorTimeout bounds each release-index mirror attempt so one
+// unreachable host cannot stall resolution for the whole timeout budget.
 const metadataMirrorTimeout = 15 * time.Second
+
+// metadataChannelTimeout bounds each channel metadata mirror attempt. Channel
+// documents are much larger than the index, so they get a larger budget.
+const metadataChannelTimeout = 60 * time.Second
+
+// availableChannelConcurrency limits parallel channel metadata fetches.
+const availableChannelConcurrency = 4
+
+// minimumAvailableMajor is the oldest channel listed when browsing downloads.
+const minimumAvailableMajor = 7
+
+// AvailableSDK describes an SDK version that can be downloaded from Microsoft's
+// release metadata. Installed-state filtering is left to the caller.
+type AvailableSDK struct {
+	Version      string `json:"version"`
+	Channel      string `json:"channel"`
+	SupportPhase string `json:"supportPhase,omitempty"`
+	ReleaseType  string `json:"releaseType,omitempty"`
+	Latest       bool   `json:"latest"`
+}
 
 // Artifact describes a downloadable SDK archive.
 type Artifact struct {
@@ -228,6 +249,163 @@ func (c *ReleaseClient) LatestSDK(ctx context.Context, version string) (dotnet.V
 	return latest, nil
 }
 
+// AvailableSDKs lists the downloadable patch versions for every stable
+// channel from 7.0 through the current release, including maintenance and
+// end-of-life channels. Versions without an archive for rid are omitted, as
+// are prerelease versions unless allowPrerelease is set. If a channel's
+// metadata cannot be fetched, its latest SDK from the release index is used.
+// The result is sorted newest first.
+func (c *ReleaseClient) AvailableSDKs(ctx context.Context, rid string, allowPrerelease bool) ([]AvailableSDK, error) {
+	index, err := c.index(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	type channelRef struct {
+		version      string
+		number       dotnet.Version
+		latestSDK    string
+		supportPhase string
+		releaseType  string
+	}
+	channels := make([]channelRef, 0, len(index.Channels))
+	for _, channel := range index.Channels {
+		number, numberErr := channel.channelNumber()
+		if numberErr != nil || number.Major < minimumAvailableMajor || !availableSupportPhase(channel.SupportPhase) {
+			continue
+		}
+		if !allowPrerelease && (strings.TrimSpace(channel.LatestSDK) == "" || strings.Contains(channel.LatestSDK, "-")) {
+			continue
+		}
+		channels = append(channels, channelRef{
+			version:      strings.TrimSpace(channel.ChannelVersion),
+			number:       number,
+			latestSDK:    strings.TrimSpace(channel.LatestSDK),
+			supportPhase: strings.TrimSpace(channel.SupportPhase),
+			releaseType:  strings.TrimSpace(channel.Type),
+		})
+	}
+	sort.SliceStable(channels, func(left, right int) bool {
+		return betterChannel(channels[left].number, channels[right].number)
+	})
+
+	available := make([]AvailableSDK, 0, 32)
+	addIndexLatest := func(channel channelRef) bool {
+		latest, err := dotnet.ParseVersion(channel.latestSDK)
+		if err != nil || latest.Major != channel.number.Major || latest.Minor != channel.number.Minor ||
+			(!allowPrerelease && latest.IsPrerelease()) {
+			return false
+		}
+		available = append(available, AvailableSDK{
+			Version:      latest.String(),
+			Channel:      channel.version,
+			SupportPhase: channel.supportPhase,
+			ReleaseType:  channel.releaseType,
+			Latest:       true,
+		})
+		return true
+	}
+
+	type fetchResult struct {
+		channel  channelRef
+		metadata releaseMetadata
+		err      error
+	}
+	results := make([]fetchResult, len(channels))
+	sem := make(chan struct{}, availableChannelConcurrency)
+	var wait sync.WaitGroup
+	for index, channel := range channels {
+		wait.Add(1)
+		go func(index int, channel channelRef) {
+			defer wait.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				results[index] = fetchResult{channel: channel, err: ctx.Err()}
+				return
+			}
+			defer func() { <-sem }()
+			metadata, err := c.channel(ctx, channel.version)
+			results[index] = fetchResult{channel: channel, metadata: metadata, err: err}
+		}(index, channel)
+	}
+	wait.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var firstErr error
+	for _, result := range results {
+		channel := result.channel
+		if result.err != nil {
+			if !addIndexLatest(channel) && firstErr == nil {
+				firstErr = result.err
+			}
+			continue
+		}
+		versions := make(map[string]dotnet.Version)
+		for _, release := range result.metadata.Releases {
+			for _, entry := range release.productReleases("sdk") {
+				parsed, parseErr := dotnet.ParseVersion(entry.Version)
+				if parseErr != nil || parsed.Major != channel.number.Major || parsed.Minor != channel.number.Minor {
+					continue
+				}
+				if !allowPrerelease && parsed.IsPrerelease() {
+					continue
+				}
+				if rid != "" {
+					if _, ok := entry.findArchive(rid); !ok {
+						continue
+					}
+				}
+				versions[parsed.String()] = parsed
+			}
+		}
+		if len(versions) == 0 {
+			continue
+		}
+		var latest dotnet.Version
+		haveLatest := false
+		for _, version := range versions {
+			if !haveLatest || version.Compare(latest) > 0 {
+				latest = version
+				haveLatest = true
+			}
+		}
+		for _, version := range versions {
+			available = append(available, AvailableSDK{
+				Version:      version.String(),
+				Channel:      channel.version,
+				SupportPhase: channel.supportPhase,
+				ReleaseType:  channel.releaseType,
+				Latest:       version.Compare(latest) == 0,
+			})
+		}
+	}
+	if len(available) == 0 && firstErr != nil {
+		return nil, fmt.Errorf("list available SDKs: %w", firstErr)
+	}
+
+	sort.SliceStable(available, func(left, right int) bool {
+		leftVersion, leftErr := dotnet.ParseVersion(available[left].Version)
+		rightVersion, rightErr := dotnet.ParseVersion(available[right].Version)
+		if leftErr == nil && rightErr == nil {
+			return leftVersion.Compare(rightVersion) > 0
+		}
+		return available[left].Version > available[right].Version
+	})
+	return available, nil
+}
+
+func availableSupportPhase(phase string) bool {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "active", "go-live", "maintenance", "eol":
+		return true
+	default:
+		return false
+	}
+}
+
 // ResolveRuntime returns the archive metadata for an exact runtime version,
 // archive product, and RID. Product is RuntimeArchiveRuntime or
 // RuntimeArchiveASPNETCore. Prerelease versions are accepted here; callers
@@ -316,19 +494,22 @@ func (c *ReleaseClient) channel(ctx context.Context, channel string) (releaseMet
 		return releaseMetadata{}, errors.New("release channel is empty")
 	}
 	c.cacheMu.Lock()
-	defer c.cacheMu.Unlock()
-	if c.channels != nil {
-		if metadata, ok := c.channels[channel]; ok {
-			return metadata, nil
-		}
-	} else {
-		c.channels = make(map[string]releaseMetadata)
+	if metadata, ok := c.channels[channel]; ok {
+		c.cacheMu.Unlock()
+		return metadata, nil
 	}
+	c.cacheMu.Unlock()
+
 	metadata, err := c.fetchChannel(ctx, channel)
 	if err != nil {
 		return releaseMetadata{}, err
 	}
+	c.cacheMu.Lock()
+	if c.channels == nil {
+		c.channels = make(map[string]releaseMetadata)
+	}
 	c.channels[channel] = metadata
+	c.cacheMu.Unlock()
 	return metadata, nil
 }
 
@@ -345,7 +526,7 @@ func (c *ReleaseClient) fetchChannel(ctx context.Context, channel string) (relea
 			lastErr = err
 			continue
 		}
-		fetchCtx, cancel := context.WithTimeout(ctx, metadataMirrorTimeout)
+		fetchCtx, cancel := context.WithTimeout(ctx, metadataChannelTimeout)
 		data, err := c.fetch(fetchCtx, parsedURL, maxMetadataBytes)
 		cancel()
 		if err != nil {

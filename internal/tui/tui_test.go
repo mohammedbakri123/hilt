@@ -96,6 +96,9 @@ type fakeBackend struct {
 	sdkUpdates          []install.Update
 	runtimeUpdates      []install.Update
 	updatesErr          error
+	available           []install.AvailableSDK
+	availableErr        error
+	availableCalls      *[]bool
 	installStarted      chan struct{}
 }
 
@@ -204,6 +207,14 @@ func (f fakeBackend) UpdateSDK(_ context.Context, version string, _ bool, progre
 func (f fakeBackend) CheckSDKUpdates(context.Context) ([]install.Update, error) {
 	f.record("check-sdk-updates")
 	return f.sdkUpdates, f.updatesErr
+}
+
+func (f fakeBackend) AvailableSDKs(_ context.Context, allowPrerelease bool) ([]install.AvailableSDK, error) {
+	f.record("available-sdks")
+	if f.availableCalls != nil {
+		*f.availableCalls = append(*f.availableCalls, allowPrerelease)
+	}
+	return f.available, f.availableErr
 }
 
 func (f fakeBackend) PlanRuntimeInstall(_ context.Context, version string, framework install.FrameworkFlavor, _ bool) (install.RuntimePlan, error) {
@@ -747,6 +758,138 @@ func TestSDKInstallFlow(t *testing.T) {
 	plans := backend.calls.installPlans()
 	if len(plans) != 1 || plans[0].Version != "10.0.112" {
 		t.Fatalf("install plans = %+v", plans)
+	}
+}
+
+func TestSDKAvailablePickerHidesInstalledAndSelects(t *testing.T) {
+	backend := newFakeBackend()
+	calls := []bool{}
+	backend.availableCalls = &calls
+	backend.available = []install.AvailableSDK{
+		{Version: "10.0.112", Channel: "10.0", SupportPhase: "active", ReleaseType: "lts", Latest: true},
+		{Version: "9.0.404", Channel: "9.0", SupportPhase: "active", ReleaseType: "sts", Latest: true},
+		{Version: "9.0.300", Channel: "9.0", SupportPhase: "active", ReleaseType: "sts"},
+		{Version: "8.0.400", Channel: "8.0", SupportPhase: "active", ReleaseType: "lts", Latest: true},
+	}
+	model := loadedModel(t, backend, 120, 36)
+	model = press(t, model, key('2', "2"))
+	updated, command := model.Update(key('i', "i"))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("SDK prompt should start an available-SDK request")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if len(calls) != 1 || calls[0] {
+		t.Fatalf("available calls = %v, want one stable-only request", calls)
+	}
+
+	view := ansi.Strip(model.View().Content)
+	start := strings.Index(view, "AVAILABLE  2")
+	end := strings.Index(view, "tab type")
+	if start < 0 || end < start {
+		t.Fatalf("picker section missing: %q", view)
+	}
+	picker := view[start:end]
+	if strings.Contains(picker, "10.0.112") || strings.Contains(picker, "9.0.300") {
+		t.Fatalf("installed SDKs were shown in the picker: %q", picker)
+	}
+	for _, want := range []string{"AVAILABLE  2", "9.0.404", "8.0.400", "installed hidden"} {
+		if !strings.Contains(picker, want) {
+			t.Errorf("picker missing %q: %q", want, picker)
+		}
+	}
+
+	model = press(t, model, key('j', "j"))
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("selecting an SDK should return a plan command")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if model.confirm != confirmInstallSDK {
+		t.Fatalf("confirm = %v, want SDK install", model.confirm)
+	}
+	if len(backend.calls.sdkPlans) != 1 || backend.calls.sdkPlans[0] != "8.0.400" {
+		t.Fatalf("plans = %v, want 8.0.400", backend.calls.sdkPlans)
+	}
+}
+
+func TestSDKAvailablePickerKeepsTypedInput(t *testing.T) {
+	backend := newFakeBackend()
+	backend.available = []install.AvailableSDK{
+		{Version: "10.0.200", Channel: "10.0", Latest: true},
+	}
+	model := loadedModel(t, backend, 120, 36)
+	model = press(t, model, key('2', "2"))
+	updated, command := model.Update(key('i', "i"))
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+	if !model.promptFocusInput {
+		t.Fatal("tab should focus the text input")
+	}
+	model = typeText(t, model, "latest")
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+	if len(backend.calls.sdkPlans) != 1 || backend.calls.sdkPlans[0] != "latest" {
+		t.Fatalf("plans = %v, want typed latest", backend.calls.sdkPlans)
+	}
+}
+
+func TestSDKAvailablePickerAllInstalled(t *testing.T) {
+	backend := newFakeBackend()
+	backend.available = []install.AvailableSDK{
+		{Version: "10.0.112", Channel: "10.0", Latest: true},
+		{Version: "9.0.300", Channel: "9.0", Latest: true},
+	}
+	model := loadedModel(t, backend, 120, 36)
+	model = press(t, model, key('2', "2"))
+	updated, command := model.Update(key('i', "i"))
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+	if !strings.Contains(ansi.Strip(model.View().Content), "already installed") {
+		t.Fatalf("all-installed message missing: %q", model.View().Content)
+	}
+
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command != nil {
+		t.Fatal("enter with no picker rows should not submit")
+	}
+	if !model.statusIsError || !strings.Contains(model.statusMessage, "Press tab") {
+		t.Fatalf("missing typed-input hint: %q", model.statusMessage)
+	}
+}
+
+func TestSDKAvailablePickerError(t *testing.T) {
+	backend := newFakeBackend()
+	backend.availableErr = errors.New("release metadata unavailable")
+	model := loadedModel(t, backend, 120, 36)
+	model = press(t, model, key('2', "2"))
+	updated, command := model.Update(key('i', "i"))
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+	view := ansi.Strip(model.View().Content)
+	if !strings.Contains(view, "Could not load available SDKs") || !strings.Contains(view, "release metadata unavailable") {
+		t.Fatalf("available error missing: %q", view)
+	}
+	if model.availableLoading {
+		t.Fatal("picker should stop loading after an error")
+	}
+}
+
+func TestOperationDownloadProgressBar(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 120, 36)
+	model = press(t, model, key('2', "2"))
+	model.startOperation("Installing managed SDK 10.0.100", func() {})
+	model = apply(t, model, progressMsg{downloaded: 5 << 20, total: 10 << 20, hasProgress: true})
+	view := ansi.Strip(model.View().Content)
+	for _, want := range []string{"50%", "5.0 MiB / 10.0 MiB", "█████", "░░░░░"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("progress bar missing %q: %q", want, view)
+		}
 	}
 }
 
