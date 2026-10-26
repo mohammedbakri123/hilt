@@ -45,7 +45,8 @@ Phase 3 project discovery provides:
 
 - `hilt projects list [--path <dir>] [--all] [--json]` discovers `.sln`,
   `.slnx`, `.slnf`, and `.csproj` files without invoking MSBuild. The default
-  root is `~/hilt/apps`; explicit `--path` values may point anywhere.
+  root is the configured `defaultProjectDir`, falling back to `~/hilt/apps`;
+  explicit `--path` values may point anywhere.
 - `hilt projects inspect <path> [--json]` reports declared target frameworks,
   SDK hints, output type, test-project hints, and project references.
 - Recursive scanning skips `bin`, `obj`, `.git`, and `node_modules` by default,
@@ -57,10 +58,17 @@ Phase 3 project discovery provides:
   Project tabs cover Overview, Packages, Data, and Output; tabs without a
   backend yet show explicit empty states. Pressing `enter` marks a project
   active and records it on Home; project files are referenced, never copied.
+- The Projects screen can change its scan root in place with `p`. The picker
+  starts at the current root, hides dot-directories until `.` is pressed, and
+  saves the folder you are viewing with `s` as the persisted
+  `defaultProjectDir` before rescanning. Settings shows the selected root but
+  remains read-only.
+- Pressing `b` on a selected project builds it in the TUI with streamed output
+  in the output drawer. Hilt does not modify the project or its build files.
 
-Not implemented: MSBuild evaluation, builds, run/test execution, `global.json`
-writes, NuGet operations, and templates. Empty project tabs state each gap
-explicitly. See [docs/roadmap.md](docs/roadmap.md).
+Not implemented: MSBuild evaluation, CLI build commands, run/test execution,
+`global.json` writes, NuGet operations, and templates. Empty project tabs state
+each gap explicitly. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 
@@ -139,9 +147,12 @@ picker, downloads show a progress bar.
 release channel as each managed installation. It reports results only; it does
 not download or update anything.
 
-`hilt projects list` scans `~/hilt/apps` by default, a `--path` directory, or a
-single project/solution file. Projects outside the Hilt home can be scanned or
-inspected explicitly; Hilt references them and never copies or moves them.
+`hilt projects list` scans the configured `defaultProjectDir` by default,
+falling back to `~/hilt/apps`, a `--path` directory, or a single
+project/solution file. Choosing a root with `p` in the TUI writes
+`defaultProjectDir` to the configuration. Projects outside the Hilt home can be
+scanned or inspected explicitly; Hilt references them and never copies or moves
+them.
 Directory names matching the configured
 `scanExclusions` (default `bin`, `obj`, `.git`, `node_modules`) are skipped at
 any depth. `--all` also includes hidden files and directories. Declared values
@@ -178,7 +189,9 @@ absolute path to move it. Relative overrides are ignored.
     logs/               future build and run logs
 ```
 
-- `Paths.ProjectsRoot` and the default project scan root are `~/hilt/apps`.
+- `Paths.ProjectsRoot` is `~/hilt/apps`. If `defaultProjectDir` is set, it
+  takes precedence as the Projects scan root; otherwise Hilt uses
+  `~/hilt/apps`.
 - Hilt creates the home, `apps/`, and internal directories at startup. The
   configuration, state, and install manifest files are still created only when
   they are written.
