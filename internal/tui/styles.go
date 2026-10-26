@@ -10,7 +10,7 @@ var (
 	colorYellow = lipgloss.Color("214")
 	colorRed    = lipgloss.Color("196")
 	colorMuted  = lipgloss.Color("244")
-	colorFaint  = lipgloss.Color("240")
+	colorFaint  = lipgloss.Color("243")
 	colorBorder = lipgloss.Color("238")
 	colorText   = lipgloss.Color("252")
 
