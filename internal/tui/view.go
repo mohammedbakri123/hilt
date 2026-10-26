@@ -87,14 +87,21 @@ func (m Model) renderHeader(width int) string {
 		distro = info.DisplayName()
 	}
 
-	title := styleTitle.Render("HILT") + " " + styleMuted.Render("v"+version)
-	right := styleMuted.Render(platformLabel + " · " + distro + " · " + m.dotnetSummary())
+	title := styleBrand.Render("HILT") + " " + styleMuted.Render("v"+version) +
+		styleFaint.Render(" / ") + styleTitle.Render(screens[m.screen].title)
+	right := styleMuted.Render(m.dotnetSummary())
+	if width >= 90 {
+		right = styleMuted.Render(platformLabel + "  ·  " + distro + "  ·  " + m.dotnetSummary())
+	}
+	if width < 64 {
+		right = ""
+	}
 	gap := width - lipgloss.Width(title) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
 	line := fitLine(title+strings.Repeat(" ", gap)+right, width)
-	rule := styleMuted.Render(strings.Repeat("─", width))
+	rule := styleBorder.Render(strings.Repeat("─", width))
 	return line + "\n" + fitLine(rule, width)
 }
 
@@ -119,33 +126,57 @@ func (m Model) dotnetSummary() string {
 }
 
 func (m Model) renderSidebar(height int) string {
-	lines := []string{styleMuted.Render("SECTIONS"), ""}
+	lines := []string{styleLabel.Render("WORKSPACE"), ""}
 	for index, screen := range screens {
-		label := fmt.Sprintf("%d %s", index+1, screen.short)
+		number := styleFaint.Render(fmt.Sprintf("%d", index+1))
 		if Screen(index) == m.screen {
-			lines = append(lines, styleSelected.Render("▸ "+label))
+			lines = append(lines, styleAccent.Render("▌ ")+number+" "+styleSelected.Render(screen.short))
 		} else {
-			lines = append(lines, "  "+label)
+			lines = append(lines, "  "+number+" "+screen.short)
 		}
 	}
-	lines = append(lines, "", styleMuted.Render("? help  q quit"))
 
 	window := windowLines(lines, sidebarWidth-1, height, 0)
 	for index, line := range window {
-		window[index] = fitLine(line, sidebarWidth-1) + styleMuted.Render("│")
+		window[index] = fitLine(line, sidebarWidth-1) + styleBorder.Render("│")
 	}
 	return strings.Join(window, "\n")
 }
 
+type keyHint struct {
+	key   string
+	label string
+}
+
 func (m Model) renderFooter(width int) string {
-	keys := " ↑/↓ navigate · 1-8 jump · r refresh · d doctor · ? help · q quit"
-	if m.screen == ScreenDiagnostics {
-		keys = " ↑/↓ navigate · r re-run · pgup/pgdn scroll · d doctor · ? help · q quit"
+	var hints []keyHint
+	switch {
+	case m.showHelp:
+		hints = []keyHint{{"esc", "close help"}, {"q", "quit"}}
+	case m.operationRunning:
+		hints = []keyHint{{"esc", "cancel operation"}}
+	case m.loadingUpdates:
+		hints = []keyHint{{"esc", "cancel update check"}}
+	case m.prompt != promptNone:
+		hints = []keyHint{{"enter", "resolve"}, {"←/→", "framework"}, {"esc", "cancel"}}
+	case m.confirm != confirmNone:
+		hints = []keyHint{{"enter/y", "confirm"}, {"esc/n", "cancel"}}
+	case m.screen == ScreenSDKs:
+		hints = []keyHint{{"tab", "switch list"}, {"↑/↓", "select"}, {"i", "install"}, {"x", "remove"}, {"u", "updates"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
+	case m.screen == ScreenDiagnostics:
+		hints = []keyHint{{"↑/↓", "sections"}, {"pgup/pgdn", "scroll"}, {"r", "re-run"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
+	default:
+		hints = []keyHint{{"↑/↓", "sections"}, {"1-8", "jump"}, {"r", "refresh"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
 	}
-	if m.screen == ScreenSDKs {
-		keys = " tab switch list · ↑/↓ select · i install · x remove · u updates · r refresh · ? help · q quit"
+
+	if width < 56 && len(hints) > 3 {
+		hints = []keyHint{{"↑/↓", "navigate"}, {"?", "help"}, {"q", "quit"}}
 	}
-	return fitLine(styleMuted.Render(keys), width)
+	parts := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		parts = append(parts, styleKey.Render(hint.key)+" "+styleMuted.Render(hint.label))
+	}
+	return fitLine(" "+strings.Join(parts, styleFaint.Render("  ·  ")), width)
 }
 
 func (m Model) renderHelp(width, height int) string {
