@@ -52,6 +52,10 @@ Implemented:
 - `hilt projects list` and `hilt projects inspect` with human and JSON output.
 - TUI Projects & Solutions screen with background scanning, cancellation, and
   selection preserved across refreshes.
+- In-place scan root picker (`p`) supporting direct directory navigation, hidden folder toggles (`.`),
+  and persisting the chosen root (`s`) as `defaultProjectDir`.
+- Interactive project build execution (`b`) in the TUI with streamed stdout/stderr output into
+  an expandable bottom drawer (`o`), autoscroll/follow toggle (`f`), and cancellation (`esc`).
 - Single Hilt home layout with `apps/` and `.hilt/`, plus an atomic,
   versioned state store package for active and recent projects.
 - Five-section TUI navigation, a global status line, a keymap-backed footer and
@@ -61,10 +65,10 @@ Implemented:
 
 Remaining:
 
-- Persist the last build/run target and output once execution lands.
+- Persist the last build/run target and output across session restarts.
 - Evaluated properties through MSBuild when available; declared-only values
   labeled as such.
-- Build, clean, restore, run, stop, and test with streaming output.
+- CLI-driven build, clean, restore, run, stop, and test commands (`hilt build`, `hilt run`, `hilt test`).
 - `global.json` inspection and write support.
 
 ## Phase 4 — NuGet

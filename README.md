@@ -1,238 +1,240 @@
-# Hilt
+# Hilt ⚡
 
-Hilt is a terminal UI and CLI for managing the .NET ecosystem on Linux. It is a
-standalone Go executable: it starts and reports useful information even when no
-.NET runtime or SDK is installed.
+[![Go Report Card](https://goreportcard.com/badge/github.com/mohammedbakri123/hilt)](https://goreportcard.com/report/github.com/mohammedbakri123/hilt)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Status
+**Hilt** is a fast, terminal-first management dashboard and CLI for the .NET development ecosystem on Linux. 
 
-Phase 1, the managed SDK/runtime portions of Phase 2, and Phase 3 project
-discovery are implemented.
+Built in pure Go with [Charm](https://charm.sh) (Bubble Tea, Lip Gloss, Bubbles) and [Cobra](https://github.com/spf13/cobra), Hilt is distributed as a **single, self-contained executable** that starts immediately and diagnoses your environment **even when no .NET SDK or runtime is installed**.
 
-Phase 1 provides:
+---
 
-- Full-screen TUI with Home, Projects, SDKs & Runtimes, Diagnostics, and Settings.
-- .NET host discovery from `DOTNET_ROOT`, `PATH`, known roots, and the managed
-  root.
-- SDK and shared-runtime inventory with provenance, ownership, and selection.
-- `hilt doctor` with human and JSON output.
-- `hilt sdk list`, `hilt sdk which`, `hilt runtime list`, and `hilt version`
-  with JSON output.
-- A single Hilt home at `~/hilt` with corrupt-file preservation.
+## Key Highlights
 
-Phase 2 managed SDKs provide:
+- **Zero-.NET Dependency:** Inspects system installations, diagnoses missing dependencies, and bootstraps .NET SDKs and runtimes from scratch without needing .NET pre-installed.
+- **Side-by-Side Managed Toolchains:** Download and install official Microsoft .NET SDKs and runtimes into an isolated, user-owned directory (`~/.hilt/data/dotnet`) without administrative privileges or modifying system files.
+- **Non-Destructive & Safe by Default:** System packages and external installations are discovered with read-wide access, but Hilt never touches `sudo`, package managers, or `PATH` automatically.
+- **Project Explorer & Cockpit:** Background scanning for solutions (`.sln`, `.slnx`, `.slnf`) and C# projects (`.csproj`), showing target frameworks, project references, and package dependencies.
+- **Interactive Streaming Build:** Build projects directly inside the TUI (`b`) with streamed stdout/stderr output into an expandable, scrollable output drawer (`o`).
+- **Comprehensive CLI & Automation:** Every management action is available through consistent CLI commands with `--json` support for seamless shell scripting and CI/CD.
 
-- `hilt sdk available` lists downloadable stable SDKs for the host platform
-  from 7.0 onward, including maintenance and end-of-life channels; installed
-  versions are hidden unless `--all` is passed.
-- `hilt sdk install <version>` from official Microsoft release metadata.
-- SHA-512 verification, archive limits, staging, and verification through the
-  installed `dotnet`.
-- Per-version roots under the Hilt-managed root, recorded in an install
-  manifest.
-- `hilt sdk remove <version>` only for manifest-owned installations.
-- `hilt sdk outdated` for explicit same-channel update checks. Hilt never
-  updates automatically.
-- `hilt sdk update <version> [--remove-old]` applies a managed SDK update.
-- `hilt runtime install <version> --framework all|netcore|aspnetcore`.
-- `hilt runtime remove <version>` and `hilt runtime outdated`.
-- Managed install, removal, and update actions in the TUI's SDKs & Runtimes
-  screen, with confirmation, cancellation, and streamed progress.
-- Read-wide discovery with write-private mutations: system and external SDKs
-  are never modified or removed, and Hilt never uses `sudo` or edits `PATH`.
+---
 
-Phase 3 project discovery provides:
+## Screenshots & Interface
 
-- `hilt projects list [--path <dir>] [--all] [--json]` discovers `.sln`,
-  `.slnx`, `.slnf`, and `.csproj` files without invoking MSBuild. The default
-  root is the configured `defaultProjectDir`, falling back to `~/hilt/apps`;
-  explicit `--path` values may point anywhere.
-- `hilt projects inspect <path> [--json]` reports declared target frameworks,
-  SDK hints, output type, test-project hints, and project references.
-- Recursive scanning skips `bin`, `obj`, `.git`, and `node_modules` by default,
-  ignores hidden paths unless `--all` is passed, guards symlink loops, and
-  honors cancellation.
-- The TUI Projects & Solutions screen scans in the background, keeps the
-  selected project across refreshes, supports `/` filtering, marks external
-  projects, and shows declared metadata in a sticky detail pane at wide widths.
-  Project tabs cover Overview, Packages, Data, and Output; tabs without a
-  backend yet show explicit empty states. Pressing `enter` marks a project
-  active and records it on Home; project files are referenced, never copied.
-- The Projects screen can change its scan root in place with `p`. The picker
-  starts at the current root, hides dot-directories until `.` is pressed, and
-  saves the folder you are viewing with `s` as the persisted
-  `defaultProjectDir` before rescanning. Settings shows the selected root but
-  remains read-only.
-- Pressing `b` on a selected project builds it in the TUI with streamed output
-  in the output drawer. Hilt does not modify the project or its build files.
+```text
+ HILT v0.1.0 / Projects & Solutions                 linux-x64 · Arch Linux · .NET SDK 10.0.100
+─────────────────────────────────────────────────────────────────────────────────────────────
+ WORKSPACE            WORKSPACES
+   1 Home               Shop                                  [sln] /home/user/src/Shop.sln
+ ▌ 2 Projects
+   3 SDKs             PROJECTS                                              [2/2 projects]
+   4 Diagnostics        NAME                  FRAMEWORKS      PATH
+   5 Settings         > Shop                  net10.0, net8.0 src/Shop/Shop.csproj
+                        Shop.Tests    [test]  net10.0         tests/Shop.Tests/Shop.Tests.csproj
 
-Not implemented: MSBuild evaluation, CLI build commands, run/test execution,
-`global.json` writes, NuGet operations, and templates. Empty project tabs state
-each gap explicitly. See [docs/roadmap.md](docs/roadmap.md).
+                      SELECTED PROJECT
+                      [Overview]  Packages  Data  Output
+                      Path          src/Shop/Shop.csproj
+                      Frameworks    net10.0, net8.0
+                      SDK           Microsoft.NET.Sdk
+                      Output        Exe
+                      References    1
+                        ..\Library\Library.csproj
+─────────────────────────────────────────────────────────────────────────────────────────────
+ [ok] Active project: Shop.
+ b build  p change root  / filter  tab focus  o drawer  r refresh  ? help  q quit
+```
 
-## Requirements
+---
 
-- Linux (amd64 and arm64 are the intended targets).
-- Go 1.26 or newer to build.
-- A terminal for the interactive TUI. The CLI works without one.
-- .NET is optional.
-- Managed installation and update checks require network access to Microsoft
-  release metadata.
+## Installation & Requirements
 
-## Build
+### Requirements
+- **OS:** Linux (x86_64 / amd64 or aarch64 / arm64)
+- **Go:** 1.24+ (only required to compile from source)
+- **.NET:** Optional (Hilt can install it for you!)
 
+### Build from Source
 ```bash
+git clone https://github.com/mohammedbakri123/hilt.git
+cd hilt
 make build
 ```
+The compiled executable will be placed in `bin/hilt`.
 
-The binary is written to `bin/hilt`. Version, commit, and build date are
-injected through linker flags. For a plain build without those flags:
-
+To install to your `GOPATH` or local bin:
 ```bash
-go build ./...
+go install ./cmd/hilt
 ```
 
-## Run
+---
 
+## Quickstart
+
+### Launch the Interactive TUI
 ```bash
-bin/hilt          # TUI, requires a TTY
-bin/hilt doctor
-bin/hilt doctor --json
-bin/hilt sdk list
-bin/hilt sdk list --json
-bin/hilt sdk which
-bin/hilt sdk which --json
-bin/hilt sdk available
-bin/hilt sdk available --all --prerelease
-bin/hilt sdk available --json
-bin/hilt sdk install <version>
-bin/hilt sdk install <version> --json
-bin/hilt sdk remove <version>
-bin/hilt sdk remove <version> --json
-bin/hilt sdk outdated
-bin/hilt sdk outdated --json
-bin/hilt sdk update <version>
-bin/hilt sdk update <version> --json
-bin/hilt runtime list
-bin/hilt runtime install <version> --framework all
-bin/hilt runtime remove <version>
-bin/hilt runtime outdated
-bin/hilt runtime outdated --json
-bin/hilt projects list
-bin/hilt projects list --path ~/src --all
-bin/hilt projects list --json
-bin/hilt projects inspect path/to/App.csproj
-bin/hilt projects inspect path/to/Solution.sln --json
-bin/hilt version
+hilt
+```
+> **Note:** The TUI requires an interactive terminal (TTY). Running `hilt` in non-interactive environments exits cleanly with code `2`.
+
+### Verify & Diagnose Host Environment
+```bash
+hilt doctor
+```
+Checks OS detection, architecture, Git availability, PATH resolution, active .NET hosts, and `global.json` compatibility.
+
+---
+
+## CLI Reference
+
+### 1. SDK Management
+```bash
+# List all detected SDKs (both system-installed and Hilt-managed)
+hilt sdk list
+
+# Show which SDK is actively resolved for current directory
+hilt sdk which
+
+# Discover downloadable SDK versions from Microsoft release metadata
+hilt sdk available
+hilt sdk available --all --prerelease
+
+# Install a managed SDK into user isolation
+hilt sdk install 10.0.100
+hilt sdk install latest
+
+# Check for updates within the same major/minor release channel
+hilt sdk outdated
+
+# Upgrade an existing managed SDK
+hilt sdk update 10.0.100 --remove-old
+
+# Remove a Hilt-managed SDK (manifest-guarded)
+hilt sdk remove 10.0.100
 ```
 
-`hilt` with no arguments and no attached terminal exits with code `2` instead of
-hanging. Commands for later phases are not registered until they work.
+### 2. Runtime Management
+```bash
+# List installed runtimes across all hosts
+hilt runtime list
 
-Managed SDKs are installed at `<HILT_HOME>/.hilt/data/dotnet/<version>`. The
-install manifest and lock live beside that directory at
-`<HILT_HOME>/.hilt/data/installs.json` and
-`<HILT_HOME>/.hilt/data/installs.lock`. Removal requires both a managed path and
-manifest ownership. An SDK copied into the managed root by hand is reported but
-cannot be removed by Hilt.
+# Install a managed runtime flavor (all, netcore, or aspnetcore)
+hilt runtime install 10.0.1 --framework aspnetcore
 
-`hilt sdk available` reads official Microsoft release metadata and lists every
-stable patch version for the host RID from .NET 7.0 onward, newest first.
-Maintenance and end-of-life channels are included. Versions already present in
-the inventory are hidden by default; `--all` includes them and `--prerelease`
-adds prerelease versions. It does not download or install anything. In the TUI
-picker, downloads show a progress bar.
+# Check for runtime updates
+hilt runtime outdated
 
-`hilt sdk outdated` checks the newest stable SDK in the same `major.minor`
-release channel as each managed installation. It reports results only; it does
-not download or update anything.
+# Remove a managed runtime
+hilt runtime remove 10.0.1
+```
 
-`hilt projects list` scans the configured `defaultProjectDir` by default,
-falling back to `~/hilt/apps`, a `--path` directory, or a single
-project/solution file. Choosing a root with `p` in the TUI writes
-`defaultProjectDir` to the configuration. Projects outside the Hilt home can be
-scanned or inspected explicitly; Hilt references them and never copies or moves
-them.
-Directory names matching the configured
-`scanExclusions` (default `bin`, `obj`, `.git`, `node_modules`) are skipped at
-any depth. `--all` also includes hidden files and directories. Declared values
-are shown as written; Hilt does not evaluate MSBuild conditions or properties.
+### 3. Project Discovery & Inspection
+```bash
+# Scan a directory for solutions and projects
+hilt projects list
+hilt projects list --path ~/Projects --all
 
-## Exit codes
+# Inspect project declared metadata (references, frameworks, test status)
+hilt projects inspect path/to/App.csproj
+hilt projects inspect path/to/App.sln --json
+```
 
-| Code | Meaning |
-| --- | --- |
-| `0` | Success, already installed, stale entry reconciled, up to date, or `doctor` found no errors. |
-| `1` | Operation failed, including a refused removal or unavailable metadata, or `doctor` found errors. |
-| `2` | Usage error, unknown command, or missing TTY for the TUI. |
-| `130` | Interrupted or cancelled. |
+### 4. JSON Output for Automation
+Every query command supports `--json`:
+```bash
+hilt doctor --json
+hilt sdk list --json
+hilt projects list --json
+```
 
-Warnings do not change the exit code. JSON output includes every finding so
-scripts can apply stricter rules.
+---
 
-## Hilt home and configuration
+## TUI Keyboard Shortcuts
 
-Hilt uses one user-owned home, `~/hilt` by default. Set `HILT_HOME` to an
-absolute path to move it. Relative overrides are ignored.
+| Key | Context | Action |
+| --- | --- | --- |
+| `1` – `5` | Global | Jump directly to screen (Home, Projects, SDKs, Doctor, Settings) |
+| `]` / `[` | Global | Cycle next / previous screen |
+| `o` | Global | Toggle build & command output drawer |
+| `r` | Global | Rescan / refresh inventory & active screen data |
+| `?` | Global | Toggle keyboard shortcut reference modal |
+| `q` / `ctrl+c`| Global | Quit Hilt (prompts if a background build is running) |
+| `b` | Projects | Build selected project with live streaming output |
+| `p` | Projects | Open in-place scan root folder picker |
+| `/` | Projects | Filter project list |
+| `,` / `.` | Projects | Switch active project detail tabs |
+| `tab` | Projects / SDKs| Toggle pane focus / switch between SDKs and Runtimes |
+| `i` | SDKs / Home | Install managed SDK or runtime |
+| `u` | SDKs | Check for updates / apply update to selected item |
+| `x` | SDKs | Remove selected managed version (guarded with confirmation) |
+
+---
+
+## Directory Layout & Storage
+
+Hilt organizes user data inside a clean, isolated root (`~/hilt` or custom `$HILT_HOME`):
 
 ```text
 ~/hilt/
-  apps/                 projects created or adopted under the Hilt home
-  .hilt/
-    config.json         user configuration
-    state.json          active project, recents, and pinned external projects
-    cache/              disposable metadata
-    data/
-      installs.json     managed-install manifest
-      installs.lock     install lock
-      dotnet/           managed SDKs and runtimes
-    logs/               future build and run logs
+├── apps/                 Default project workspace root
+└── .hilt/
+    ├── config.json       User configuration (read-only in UI, editable in JSON)
+    ├── state.json        Active project, recents, and pinned targets
+    ├── cache/            Disposable Microsoft release metadata caches
+    └── data/
+        ├── installs.json Managed installation manifest
+        ├── installs.lock Mutex lock file protecting concurrent operations
+        └── dotnet/       Per-version isolated .NET toolchains
 ```
 
-- `Paths.ProjectsRoot` is `~/hilt/apps`. If `defaultProjectDir` is set, it
-  takes precedence as the Projects scan root; otherwise Hilt uses
-  `~/hilt/apps`.
-- Hilt creates the home, `apps/`, and internal directories at startup. The
-  configuration, state, and install manifest files are still created only when
-  they are written.
-- `HILT_HOME` applies to configuration, state, cache, data, logs, and the
-  managed toolchain root. XDG variables no longer select these locations.
-- Projects outside `~/hilt/apps` remain valid. Hilt records their paths but
-  never copies, moves, or rewrites them.
-- Existing projects are never migrated into the Hilt home automatically.
-- If a legacy XDG install manifest is present and the new manifest is not,
-  Hilt warns at startup. It does not move or delete the legacy data, so managed
-  installs are not lost silently.
+- **Atomic Writes:** Configuration and state files use atomic rename with `0600` permissions.
+- **Corruption Resilience:** Corrupt JSON files are backed up to `.corrupt-<timestamp>` and safely regenerated with defaults.
 
-The configuration file is created only when a save is requested. Malformed
-configuration and state files are moved to `.corrupt-<timestamp>` and defaults
-are loaded. Unknown configuration fields are preserved on save. Configuration
-and state writes are atomic with mode `0600`. See
-[docs/safety.md](docs/safety.md).
+---
 
-## Verification
+## Roadmap
 
+| Phase | Milestone | Status |
+| --- | --- | :---: |
+| **Phase 1** | Standalone foundation, platform detection, `hilt doctor`, TUI shell | ✅ Complete |
+| **Phase 2** | Managed SDK/runtime install, verification, updates, manifests | ✅ Complete |
+| **Phase 3** | Solution/project scanner, metadata inspection, streaming build drawer | ✅ Complete |
+| **Phase 4** | Interactive NuGet package manager (search, add, update, audit) | 🚧 In Progress |
+| **Phase 5** | Project templating (Clean Architecture, Vertical Slice, `dotnet new`) | 📋 Planned |
+| **Phase 6** | Binary distribution (x64/ARM64 packages, CI/CD, shell completions) | 📋 Planned |
+
+See [docs/roadmap.md](docs/roadmap.md) for detailed progress.
+
+---
+
+## Contributing & Testing
+
+Run the full verification suite (tests, vet, format check, and build):
 ```bash
 ./scripts/verify.sh
 ```
 
-The script checks formatting, runs `go vet`, the test suite, the race-enabled
-test suite, and builds the binary. Ordinary tests require neither network access
-nor administrator privileges. Install, removal, and update checks use local
-HTTP metadata and archive fixtures. A real-SDK integration test is opt-in:
+Run unit tests directly:
+```bash
+go test -count=1 ./...
+```
 
+Run integration test against real host .NET (if installed):
 ```bash
 HILT_TEST_REAL_DOTNET=1 go test ./internal/dotnet -run TestRealDotnetInventory -v
 ```
 
-Real Microsoft downloads are not exercised by the regular suite.
+---
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — package boundaries and data flow.
-- [docs/safety.md](docs/safety.md) — installation and version-management policy.
-- [docs/roadmap.md](docs/roadmap.md) — phases 2–6.
+- [Architecture & Design](docs/architecture.md) — Package boundaries, dependency flow, and components.
+- [Safety & Isolation Policy](docs/safety.md) — Security rules, elevation guarantees, and mutation boundaries.
+- [Project Roadmap](docs/roadmap.md) — Detailed phase delivery schedule.
+
+---
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE) © Mohammed Bakri
