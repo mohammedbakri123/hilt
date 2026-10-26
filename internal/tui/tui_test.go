@@ -1299,3 +1299,37 @@ func TestProjectsFooterKeepsQuitHint(t *testing.T) {
 		t.Fatalf("projects footer missing actions: %q", footer)
 	}
 }
+
+func TestStatusLineAppearsOnEveryScreen(t *testing.T) {
+	projectsBackend := newFakeBackend()
+	projectsBackend.projectResult = projectFixture()
+	tests := []struct {
+		name  string
+		model Model
+	}{
+		{name: "dashboard", model: loadedModel(t, newFakeBackend(), 100, 30)},
+		{name: "projects", model: openProjects(t, projectsBackend, 100, 30)},
+		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 100, 30), key('7', "7"))},
+		{name: "settings", model: press(t, loadedModel(t, newFakeBackend(), 100, 30), key('8', "8"))},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			model := test.model
+			model.setStatus("Status is visible here.", false)
+			plain := ansi.Strip(model.View().Content)
+			if !strings.Contains(plain, "[ok] Status is visible here.") {
+				t.Fatalf("status line missing:\n%s", plain)
+			}
+			lines := strings.Split(plain, "\n")
+			if len(lines) < 2 || !strings.Contains(lines[len(lines)-2], "Status is visible here.") {
+				t.Fatalf("status line is not above the footer:\n%s", plain)
+			}
+
+			model.setStatus("Status failed here.", true)
+			plain = ansi.Strip(model.View().Content)
+			if !strings.Contains(plain, "[err] Status failed here.") {
+				t.Fatalf("error status line missing:\n%s", plain)
+			}
+		})
+	}
+}

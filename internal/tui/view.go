@@ -43,8 +43,9 @@ func (m Model) View() tea.View {
 
 func (m Model) render(width, height int) string {
 	header := m.renderHeader(width)
+	status := m.renderStatusLine(width)
 	footer := m.renderFooter(width)
-	bodyHeight := height - lipgloss.Height(header) - lipgloss.Height(footer)
+	bodyHeight := height - lipgloss.Height(header) - lipgloss.Height(status) - lipgloss.Height(footer)
 	if bodyHeight < 3 {
 		bodyHeight = 3
 	}
@@ -70,12 +71,25 @@ func (m Model) render(width, height int) string {
 	main := strings.Join(prefixed, "\n")
 
 	if !m.showSidebar() {
-		return lipgloss.JoinVertical(lipgloss.Left, header, main, footer)
+		return lipgloss.JoinVertical(lipgloss.Left, header, main, status, footer)
 	}
 
 	sidebar := m.renderSidebar(bodyHeight)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, status, footer)
+}
+
+func (m Model) renderStatusLine(width int) string {
+	if m.statusMessage == "" {
+		return fitLine("", width)
+	}
+	badge := styleOK.Render("[ok]")
+	style := styleOK
+	if m.statusIsError {
+		badge = styleError.Render("[err]")
+		style = styleError
+	}
+	return fitLine(" "+badge+" "+style.Render(m.statusMessage), width)
 }
 
 func (m Model) renderHeader(width int) string {
@@ -741,22 +755,6 @@ func (m Model) managementLines(width int) []string {
 	}
 	if m.loadingUpdates {
 		return append(lines, "", m.spinner.View()+" checking managed updates...")
-	}
-	if m.statusMessage != "" {
-		badge := styleOK.Render("[ok]")
-		style := styleOK
-		if m.statusIsError {
-			badge = styleError.Render("[err]")
-			style = styleError
-		}
-		lines = append(lines, "")
-		for index, line := range wrap(m.statusMessage, width-6) {
-			if index == 0 {
-				lines = append(lines, badge+" "+style.Render(line))
-			} else {
-				lines = append(lines, "      "+style.Render(line))
-			}
-		}
 	}
 	return lines
 }
