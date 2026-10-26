@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
+	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
 )
 
@@ -163,8 +164,14 @@ func (m Model) renderFooter(width int) string {
 		hints = []keyHint{{"enter/y", "confirm"}, {"esc/n", "cancel"}}
 	case m.screen == ScreenSDKs:
 		hints = []keyHint{{"tab", "switch list"}, {"↑/↓", "select"}, {"i", "install"}, {"x", "remove"}, {"u", "updates"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
+		if width < 110 {
+			hints = []keyHint{{"tab", "list"}, {"i", "install"}, {"x", "remove"}, {"u", "updates"}, {"?", "help"}, {"q", "quit"}}
+		}
 	case m.screen == ScreenDiagnostics:
 		hints = []keyHint{{"↑/↓", "sections"}, {"pgup/pgdn", "scroll"}, {"r", "re-run"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
+		if width < 100 {
+			hints = []keyHint{{"↑/↓", "sections"}, {"r", "re-run"}, {"?", "help"}, {"q", "quit"}}
+		}
 	default:
 		hints = []keyHint{{"↑/↓", "sections"}, {"1-8", "jump"}, {"r", "refresh"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
 	}
@@ -413,36 +420,57 @@ func (m Model) sdkLines(width int) []string {
 	}
 
 	inventory := m.inventory
-	lines = append(lines, fmt.Sprintf("%d host(s) · %d SDK(s) · %d runtime(s)",
-		len(inventory.Hosts), len(inventory.SDKs), len(inventory.Runtimes)))
+	lines = append(lines, styleMuted.Render(fmt.Sprintf("  %d host  ·  %d SDKs  ·  %d runtimes",
+		len(inventory.Hosts), len(inventory.SDKs), len(inventory.Runtimes))))
 
-	lines = append(lines, "", styleLabel.Render("SELECTED TOOLCHAIN"))
-	switch {
-	case m.selection != nil:
-		lines = append(lines,
-			fmt.Sprintf("  SDK %s (%s)", m.selection.SDKVersion, m.selection.EffectiveProvenance()),
-			"  root "+m.selection.Root,
-		)
-		if m.selection.GlobalJSONPath != "" {
-			lines = append(lines, "  global.json "+m.selection.GlobalJSONPath)
+	lines = append(lines, "")
+	if m.bodyHeight() >= 26 {
+		toolchain := []string{}
+		switch {
+		case m.selection != nil:
+			toolchain = append(toolchain,
+				kvSized("SDK", fmt.Sprintf("%s  %s", styleValue.Render(m.selection.SDKVersion), provenanceText(m.selection.EffectiveProvenance())), 11),
+				kvSized("Root", m.selection.Root, 11),
+			)
+			if m.selection.GlobalJSONPath != "" {
+				toolchain = append(toolchain, kvSized("global.json", m.selection.GlobalJSONPath, 11))
+			}
+			if m.selection.Rationale != "" {
+				for _, line := range wrap(m.selection.Rationale, width-6) {
+					toolchain = append(toolchain, styleMuted.Render(line))
+				}
+			}
+		case m.selectionErr != nil:
+			for _, line := range styledWrapped(m.selectionErr.Error(), width-6, styleWarning) {
+				toolchain = append(toolchain, line)
+			}
+		default:
+			toolchain = append(toolchain, styleMuted.Render("not resolved"))
 		}
-		if m.selection.Rationale != "" {
-			lines = append(lines, "  "+styleMuted.Render(m.selection.Rationale))
+		lines = append(lines, panelBox("SELECTED TOOLCHAIN", toolchain, width)...)
+	} else {
+		switch {
+		case m.selection != nil:
+			lines = append(lines, "  "+styleLabel.Render("TOOLCHAIN")+"  "+styleValue.Render(m.selection.SDKVersion)+"  "+provenanceText(m.selection.EffectiveProvenance()))
+			lines = append(lines, "  "+styleLabel.Render("ROOT")+"       "+styleMuted.Render(m.selection.Root))
+			if m.selection.GlobalJSONPath != "" {
+				lines = append(lines, "  "+styleLabel.Render("GLOBAL")+"     "+styleMuted.Render(m.selection.GlobalJSONPath))
+			}
+		case m.selectionErr != nil:
+			lines = append(lines, styledWrapped(m.selectionErr.Error(), width-4, styleWarning)...)
+		default:
+			lines = append(lines, "  "+styleMuted.Render("not resolved"))
 		}
-	case m.selectionErr != nil:
-		lines = append(lines, "  "+styleWarning.Render(m.selectionErr.Error()))
-	default:
-		lines = append(lines, "  not resolved")
 	}
 
 	lines = append(lines, "", styleLabel.Render("HOSTS"))
 	if len(inventory.Hosts) == 0 {
-		lines = append(lines, "  none detected")
+		lines = append(lines, "  "+styleMuted.Render("none detected"))
 	}
 	for _, host := range inventory.Hosts {
-		line := fmt.Sprintf("  %s  [%s] %s", host.Root, host.Source, host.EffectiveProvenance())
+		line := "  " + styleValue.Render(host.Root) + "  " + styleMuted.Render(fmt.Sprintf("[%s] %s", host.Source, host.EffectiveProvenance()))
 		if host.Architecture != "" {
-			line += "  arch=" + host.Architecture
+			line += styleFaint.Render("  arch=" + host.Architecture)
 		}
 		lines = append(lines, line)
 		if host.ProbeError != "" {
@@ -450,13 +478,11 @@ func (m Model) sdkLines(width int) []string {
 		}
 	}
 
-	sdkLabel := "SDKS"
-	if m.sdkFocus == focusSDKs {
-		sdkLabel += "  " + styleMuted.Render("(focused)")
-	}
-	lines = append(lines, "", styleLabel.Render(sdkLabel))
+	lines = append(lines, "", listLabel("SDKS", m.sdkFocus == focusSDKs))
 	if len(inventory.SDKs) == 0 {
-		lines = append(lines, "  none detected. Press i to install a managed SDK.")
+		lines = append(lines, "  "+styleMuted.Render("None detected.")+" Press i to install a managed SDK.")
+	} else {
+		lines = append(lines, "    "+styleFaint.Render(fmt.Sprintf("%-12s %-10s %s", "VERSION", "SOURCE", "LOCATION")))
 	}
 	updateByVersion := make(map[string]install.Update, len(m.updates))
 	for _, update := range m.updates {
@@ -469,26 +495,28 @@ func (m Model) sdkLines(width int) []string {
 		}
 		marker := " "
 		if index == m.sdkCursor && m.sdkFocus == focusSDKs {
-			marker = ">"
+			marker = styleAccent.Render(">")
 		}
 		if m.selection != nil && sdk.Root == m.selection.Root && sdk.Version == m.selection.SDKVersion {
-			marker = "*"
+			marker = styleOK.Render("*")
 		}
-		line := fmt.Sprintf("  %s %-12s %s  [%s]%s", marker, sdk.Version, sdk.Path, sdk.EffectiveProvenance(), state)
+		version := fmt.Sprintf("%-12s", sdk.Version)
+		if index == m.sdkCursor && m.sdkFocus == focusSDKs {
+			version = styleValue.Render(version)
+		}
+		line := "  " + marker + " " + version + " " + provenanceCell(sdk.EffectiveProvenance()) + " " + styleMuted.Render(sdk.Path) + state
 		if update, ok := updateByVersion[sdk.Version]; ok && update.UpdateAvailable {
 			line += "  " + styleAccent.Render("→ "+update.LatestVersion+" available")
 		}
 		lines = append(lines, line)
 	}
 
-	runtimeLabel := "RUNTIMES"
-	if m.sdkFocus == focusRuntimes {
-		runtimeLabel += "  " + styleMuted.Render("(focused)")
-	}
-	lines = append(lines, "", styleLabel.Render(runtimeLabel))
+	lines = append(lines, "", listLabel("RUNTIMES", m.sdkFocus == focusRuntimes))
 	runtimes := m.orderedRuntimes()
 	if len(runtimes) == 0 {
-		lines = append(lines, "  none detected. Press tab then i to install a managed runtime.")
+		lines = append(lines, "  "+styleMuted.Render("None detected.")+" Press tab then i to install a managed runtime.")
+	} else {
+		lines = append(lines, "    "+styleFaint.Render(fmt.Sprintf("%-24s %-12s %s", "FRAMEWORK", "VERSION", "SOURCE")))
 	}
 	runtimeUpdates := make(map[string]install.Update, len(m.runtimeUpdates))
 	for _, update := range m.runtimeUpdates {
@@ -497,9 +525,13 @@ func (m Model) sdkLines(width int) []string {
 	for index, runtime := range runtimes {
 		marker := " "
 		if index == m.runtimeCursor && m.sdkFocus == focusRuntimes {
-			marker = ">"
+			marker = styleAccent.Render(">")
 		}
-		line := fmt.Sprintf("  %s %-32s %-12s [%s]", marker, runtime.Framework, runtime.Version, runtime.EffectiveProvenance())
+		version := fmt.Sprintf("%-12s", runtime.Version)
+		if index == m.runtimeCursor && m.sdkFocus == focusRuntimes {
+			version = styleValue.Render(version)
+		}
+		line := "  " + marker + " " + fmt.Sprintf("%-24s", runtime.Framework) + " " + version + " " + provenanceCell(runtime.EffectiveProvenance())
 		if update, ok := runtimeUpdates[runtime.Version]; ok && update.UpdateAvailable {
 			line += "  " + styleAccent.Render("→ "+update.LatestVersion+" available")
 		}
@@ -569,6 +601,36 @@ func (m Model) managementLines(width int) []string {
 		}
 	}
 	return lines
+}
+
+func listLabel(label string, focused bool) string {
+	if !focused {
+		return styleLabel.Render(label)
+	}
+	return styleSelected.Render(label) + "  " + styleAccent.Render("(focused)")
+}
+
+func provenanceText(provenance dotnet.Provenance) string {
+	switch provenance {
+	case dotnet.ProvenanceManaged:
+		return styleOK.Render(string(provenance))
+	case dotnet.ProvenanceExternal:
+		return styleWarning.Render(string(provenance))
+	default:
+		return styleMuted.Render(string(provenance))
+	}
+}
+
+func provenanceCell(provenance dotnet.Provenance) string {
+	label := string(provenance)
+	style := styleMuted
+	switch provenance {
+	case dotnet.ProvenanceManaged:
+		style = styleOK
+	case dotnet.ProvenanceExternal:
+		style = styleWarning
+	}
+	return style.Render(fmt.Sprintf("%-10s", label))
 }
 
 func (m Model) diagnosticLines(width int) []string {

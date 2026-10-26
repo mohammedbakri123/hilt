@@ -404,10 +404,11 @@ func TestNavigation(t *testing.T) {
 		t.Fatalf("screen = %v, want SDKs", model.screen)
 	}
 	view := model.View().Content
-	if !strings.Contains(view, "SDKs & Runtimes") || !strings.Contains(view, "HOSTS") || !strings.Contains(view, "RUNTIMES") {
+	plain := ansi.Strip(view)
+	if !strings.Contains(plain, "SDKs & Runtimes") || !strings.Contains(plain, "HOSTS") || !strings.Contains(plain, "RUNTIMES") {
 		t.Errorf("SDK screen missing content: %q", view)
 	}
-	if !strings.Contains(view, "SELECTED TOOLCHAIN") || !strings.Contains(view, "* 10.0.112") {
+	if !strings.Contains(plain, "SELECTED TOOLCHAIN") || !strings.Contains(plain, "* 10.0.112") {
 		t.Errorf("SDK screen missing selection: %q", view)
 	}
 
@@ -645,6 +646,27 @@ func TestSDKListFocusAndSelection(t *testing.T) {
 	view := model.View().Content
 	if !strings.Contains(view, "RUNTIMES") || !strings.Contains(view, "(focused)") || !strings.Contains(view, ">") {
 		t.Fatalf("runtime focus not rendered: %q", view)
+	}
+}
+
+func TestSDKTablesShowColumns(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	model = press(t, model, key('2', "2"))
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"SELECTED TOOLCHAIN", "VERSION", "SOURCE", "LOCATION", "FRAMEWORK", "managed"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("SDK table missing %q", want)
+		}
+	}
+}
+
+func TestSDKFooterKeepsQuitHint(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 80, 24)
+	model = press(t, model, key('2', "2"))
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+	footer := lines[len(lines)-1]
+	if !strings.Contains(footer, "? help") || !strings.Contains(footer, "q quit") {
+		t.Fatalf("footer lost essential hints: %q", footer)
 	}
 }
 
