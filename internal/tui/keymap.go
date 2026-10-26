@@ -48,6 +48,7 @@ const (
 	ctxDiagnostics     keyContext = "diagnostics"
 	ctxProjectsLoading keyContext = "projects-loading"
 	ctxProjects        keyContext = "projects"
+	ctxProjectSplit    keyContext = "project-split"
 	ctxSettings        keyContext = "settings"
 	ctxNarrow          keyContext = "narrow"
 	ctxHelpNavigation  keyContext = "help-navigation"
@@ -141,6 +142,14 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
+		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
+		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
+	}},
+	ctxProjectSplit: {CompactWidth: 120, Bindings: []keyBinding{
+		{Key: "tab", Action: actionSwitchFocus, Label: "focus", Compact: true},
+		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
+		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},

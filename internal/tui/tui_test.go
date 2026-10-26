@@ -1508,7 +1508,8 @@ func TestFooterMatchesKeymap(t *testing.T) {
 		{name: "sdks", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('3', "3")), context: ctxSDKs},
 		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('4', "4")), context: ctxDiagnostics},
 		{name: "projects loading", model: projectsLoading, context: ctxProjectsLoading},
-		{name: "projects", model: projects, context: ctxProjects},
+		{name: "projects", model: openProjects(t, backend, 110, 30), context: ctxProjects},
+		{name: "project split", model: projects, context: ctxProjectSplit},
 		{name: "settings", model: settings, context: ctxSettings},
 	}
 	for _, test := range tests {
@@ -1584,5 +1585,77 @@ func TestTopLevelNavigationHasFiveDestinations(t *testing.T) {
 		if model.screen != Screen(index) {
 			t.Errorf("key %d selected screen %v, want %v", index+1, model.screen, Screen(index))
 		}
+	}
+}
+
+func TestProjectsSplitFocusAndScrolling(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	result := projectFixture()
+	for index := 0; index < 30; index++ {
+		result.Projects = append(result.Projects, projects.Project{
+			Path:             fmt.Sprintf("/work/src/Extra%02d/Extra%02d.csproj", index, index),
+			Name:             fmt.Sprintf("Extra%02d", index),
+			Directory:        fmt.Sprintf("/work/src/Extra%02d", index),
+			Kind:             projects.KindProject,
+			TargetFrameworks: []string{"net10.0"},
+			SDK:              "Microsoft.NET.Sdk",
+		})
+	}
+	for index := 0; index < 30; index++ {
+		result.Projects[0].ProjectReferences = append(result.Projects[0].ProjectReferences, fmt.Sprintf("/work/src/Ref%02d/Ref%02d.csproj", index, index))
+	}
+	backend.projectResult = result
+	model := openProjects(t, backend, 160, 30)
+	if !model.projectSplit() {
+		t.Fatal("projects should use split panes at 160 columns")
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"OVERVIEW", "PROJECTS [focus]", "focus: project list", "Shop.csproj"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("split projects missing %q:\n%s", want, plain)
+		}
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+	if model.projectFocus != projectFocusDetail {
+		t.Fatalf("tab focus = %v, want detail", model.projectFocus)
+	}
+	plain = ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "OVERVIEW [focus]") || !strings.Contains(plain, "focus: project detail") {
+		t.Fatalf("detail focus not visible:\n%s", plain)
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if model.projectDetailScroll <= 0 {
+		t.Fatal("pgdown did not scroll the focused detail pane")
+	}
+	if model.projectListScroll != 0 {
+		t.Fatalf("detail scrolling changed the list scroll to %d", model.projectListScroll)
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if model.projectListScroll <= 0 {
+		t.Fatal("pgdown did not scroll the focused list pane")
+	}
+	model = press(t, model, key('j', "j"))
+	if model.projectCursor == 0 {
+		t.Fatal("selection did not move")
+	}
+	if model.projectDetailScroll != 0 {
+		t.Fatalf("list scrolling changed the detail scroll to %d", model.projectDetailScroll)
+	}
+}
+
+func TestProjectsNarrowLayoutKeepsTabNavigation(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 80, 24)
+	if model.projectSplit() {
+		t.Fatal("projects should use the stacked layout at 80 columns")
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+	if model.screen != ScreenSDKs {
+		t.Fatalf("tab navigated to %v, want SDKs", model.screen)
 	}
 }

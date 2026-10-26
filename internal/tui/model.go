@@ -155,14 +155,17 @@ type Model struct {
 	progressDone        int64
 	progressTotal       int64
 
-	projectsLoading bool
-	projectsLoaded  bool
-	projectResult   *projects.Result
-	projectsErr     error
-	projectCursor   int
-	projectScroll   int
-	projectCancel   context.CancelFunc
-	projectRequest  int
+	projectsLoading     bool
+	projectsLoaded      bool
+	projectResult       *projects.Result
+	projectsErr         error
+	projectCursor       int
+	projectScroll       int
+	projectListScroll   int
+	projectDetailScroll int
+	projectFocus        projectFocus
+	projectCancel       context.CancelFunc
+	projectRequest      int
 
 	updates        []install.Update
 	runtimeUpdates []install.Update
@@ -523,11 +526,23 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.screen == ScreenProjects {
+		if key == "tab" && m.projectSplit() {
+			m.toggleProjectFocus()
+			return m, nil
+		}
 		switch key {
 		case "up", "k":
+			if m.projectSplit() && m.projectFocus == projectFocusDetail {
+				m.scrollFocusedBy(-1)
+				return m, nil
+			}
 			m.moveProject(-1)
 			return m, nil
 		case "down", "j":
+			if m.projectSplit() && m.projectFocus == projectFocusDetail {
+				m.scrollFocusedBy(1)
+				return m, nil
+			}
 			m.moveProject(1)
 			return m, nil
 		}
@@ -554,16 +569,16 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		command := m.navigate(Screen(m.cursor))
 		return m, command
 	case "pgup", "ctrl+u":
-		m.scrollBy(-8)
+		m.scrollFocusedBy(-8)
 		return m, nil
 	case "pgdown", "ctrl+d":
-		m.scrollBy(8)
+		m.scrollFocusedBy(8)
 		return m, nil
 	case "home":
-		m.setScroll(0)
+		m.setFocusedScroll(0)
 		return m, nil
 	case "end":
-		m.setScroll(m.maxScroll())
+		m.setFocusedScroll(m.maxFocusedScroll())
 		return m, nil
 	}
 

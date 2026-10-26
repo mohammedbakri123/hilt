@@ -10,7 +10,17 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
-const projectsScanTimeout = 30 * time.Second
+const (
+	projectsScanTimeout  = 30 * time.Second
+	projectSplitMinWidth = 120
+)
+
+type projectFocus int
+
+const (
+	projectFocusList projectFocus = iota
+	projectFocusDetail
+)
 
 func (m *Model) startProjectsScan() tea.Cmd {
 	if m.backend == nil {
@@ -72,6 +82,7 @@ func (m Model) handleProjectsMsg(message projectsMsg) (tea.Model, tea.Cmd) {
 	m.projectsErr = nil
 	m.projectsLoaded = true
 	m.restoreProjectSelection(previous)
+	m.ensureProjectSelectionVisible()
 	m.clampScroll()
 	return m, nil
 }
@@ -81,6 +92,96 @@ func (m *Model) moveProject(delta int) {
 		return
 	}
 	m.projectCursor = clampIndex(m.projectCursor+delta, len(m.projectResult.Projects))
+	m.projectDetailScroll = 0
+	m.ensureProjectSelectionVisible()
+}
+
+func (m Model) projectSplit() bool {
+	return m.contentWidth() >= projectSplitMinWidth
+}
+
+func (m *Model) toggleProjectFocus() {
+	if !m.projectSplit() {
+		m.projectFocus = projectFocusList
+		return
+	}
+	if m.projectFocus == projectFocusList {
+		m.projectFocus = projectFocusDetail
+		return
+	}
+	m.projectFocus = projectFocusList
+}
+
+func (m Model) focusLabel() string {
+	if m.projectFocus == projectFocusDetail {
+		return "project detail"
+	}
+	return "project list"
+}
+
+func (m *Model) ensureProjectSelectionVisible() {
+	if !m.projectSplit() {
+		return
+	}
+	_, selectedLine := m.projectListContent()
+	visible := m.projectListVisibleHeight()
+	if visible <= 0 {
+		return
+	}
+	if selectedLine < m.projectListScroll {
+		m.projectListScroll = selectedLine
+	}
+	if selectedLine >= m.projectListScroll+visible {
+		m.projectListScroll = selectedLine - visible + 1
+	}
+	m.projectListScroll = clampIndex(m.projectListScroll, m.projectListContentHeight())
+}
+
+func (m *Model) scrollFocusedBy(delta int) {
+	if m.screen == ScreenProjects && m.projectSplit() {
+		m.setFocusedScroll(m.focusedScroll() + delta)
+		return
+	}
+	m.setScroll(m.scrollOffset() + delta)
+}
+
+func (m *Model) setFocusedScroll(value int) {
+	if m.screen == ScreenProjects && m.projectSplit() {
+		maximum := m.maxFocusedScroll()
+		if value < 0 {
+			value = 0
+		}
+		if value > maximum {
+			value = maximum
+		}
+		if m.projectFocus == projectFocusDetail {
+			m.projectDetailScroll = value
+		} else {
+			m.projectListScroll = value
+		}
+		return
+	}
+	m.setScroll(value)
+}
+
+func (m Model) focusedScroll() int {
+	if m.screen != ScreenProjects || !m.projectSplit() {
+		return m.scrollOffset()
+	}
+	if m.projectFocus == projectFocusDetail {
+		return m.projectDetailScroll
+	}
+	return m.projectListScroll
+}
+
+func (m Model) maxFocusedScroll() int {
+	if m.screen != ScreenProjects || !m.projectSplit() {
+		return m.maxScroll()
+	}
+	if m.projectFocus == projectFocusDetail {
+		return m.projectDetailContentHeight()
+	}
+	return m.projectListContentHeight()
 }
 
 func (m Model) selectedProject() (projects.Project, bool) {
