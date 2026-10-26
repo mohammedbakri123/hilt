@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -19,6 +20,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/projects"
+	"github.com/mohammedbakri123/hilt/internal/state"
 )
 
 type fakeCalls struct {
@@ -105,12 +107,43 @@ type fakeBackend struct {
 	projectResult       projects.Result
 	projectErr          error
 	projectCalls        *int
+	state               *state.State
+	stateErr            error
 }
 
 func (f fakeBackend) Version() string          { return "test" }
 func (f fakeBackend) Config() config.Config    { return f.config }
 func (f fakeBackend) Paths() platform.Paths    { return f.paths }
 func (f fakeBackend) ConfigWarnings() []string { return f.configWarnings }
+func (f fakeBackend) State() state.State {
+	if f.state == nil {
+		return state.Defaults()
+	}
+	return *f.state
+}
+func (f fakeBackend) RecordProjectOpen(projectPath, workspacePath string) error {
+	if f.stateErr != nil {
+		return f.stateErr
+	}
+	if f.state == nil {
+		return errors.New("state unavailable")
+	}
+	f.state.SchemaVersion = state.CurrentSchemaVersion
+	f.state.ActiveProject = projectPath
+	f.state.ActiveWorkspace = workspacePath
+	recent := []state.RecentProject{{Path: projectPath, LastOpened: time.Now().UTC()}}
+	for _, entry := range f.state.RecentProjects {
+		if entry.Path == projectPath {
+			continue
+		}
+		recent = append(recent, entry)
+		if len(recent) == 10 {
+			break
+		}
+	}
+	f.state.RecentProjects = recent
+	return nil
+}
 func (f fakeBackend) Inventory(context.Context) (dotnet.Inventory, error) {
 	return f.inventory, f.inventoryErr
 }
@@ -300,8 +333,10 @@ func (f fakeBackend) record(name string) {
 }
 
 func newFakeBackend() fakeBackend {
+	stateValue := state.Defaults()
 	return fakeBackend{
 		calls: &fakeCalls{},
+		state: &stateValue,
 		inventory: dotnet.Inventory{
 			Hosts: []dotnet.Host{{
 				Root:       "/usr/share/dotnet",
@@ -1760,6 +1795,51 @@ func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if model.projectFilter != "" {
 		t.Fatalf("esc did not clear the applied filter: %q", model.projectFilter)
+	}
+}
+
+func TestProjectsEnterMarksActiveAndShowsRecent(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 40)
+	model = press(t, model, key('j', "j"))
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+
+	value := backend.State()
+	if value.ActiveProject != "/work/tests/Shop.Tests/Shop.Tests.csproj" {
+		t.Fatalf("active project = %q", value.ActiveProject)
+	}
+	if value.ActiveWorkspace != "/work/Shop.sln" {
+		t.Fatalf("active workspace = %q", value.ActiveWorkspace)
+	}
+	if len(value.RecentProjects) != 1 || value.RecentProjects[0].Path != value.ActiveProject {
+		t.Fatalf("recent projects = %+v", value.RecentProjects)
+	}
+	if !strings.Contains(ansi.Strip(model.View().Content), "Active project: Shop.Tests") {
+		t.Fatalf("status missing active project:\n%s", ansi.Strip(model.View().Content))
+	}
+
+	model = press(t, model, key('1', "1"))
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Active project", value.ActiveProject, "Recent projects", "Shop.Tests.csproj"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("home state missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestProjectsEnterReportsStateErrors(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.stateErr = errors.New("disk is read-only")
+	model := openProjects(t, backend, 100, 30)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+	if !strings.Contains(ansi.Strip(model.View().Content), "Could not remember project: disk is read-only") {
+		t.Fatalf("state error missing:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 

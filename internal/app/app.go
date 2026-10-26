@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
@@ -16,6 +18,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/process"
 	"github.com/mohammedbakri123/hilt/internal/projects"
+	"github.com/mohammedbakri123/hilt/internal/state"
 )
 
 // App is the composition root for Hilt services. It is safe to construct
@@ -33,6 +36,9 @@ type App struct {
 	packageManager *platform.PackageManager
 	cwd            string
 	home           string
+	state          state.State
+	stateStore     state.Store
+	stateMu        sync.Mutex
 }
 
 // New detects the host and loads configuration.
@@ -56,6 +62,12 @@ func New(version string) *App {
 	if cfg.DefaultProjectDir == "" {
 		cfg.DefaultProjectDir = paths.ProjectsRoot
 	}
+	stateStore := state.Store{Path: paths.StateFile()}
+	currentState, stateWarnings, stateErr := stateStore.Load()
+	if stateErr != nil {
+		warnings = append(warnings, "state: "+stateErr.Error())
+	}
+	warnings = append(warnings, stateWarnings...)
 	if err := paths.EnsureLayout(); err != nil {
 		warnings = append(warnings, "create Hilt directories: "+err.Error())
 	}
@@ -91,6 +103,8 @@ func New(version string) *App {
 		packageManager: platform.FindPackageManager(lookPath),
 		cwd:            cwd,
 		home:           home,
+		state:          currentState,
+		stateStore:     stateStore,
 	}
 }
 
@@ -109,6 +123,47 @@ func (a *App) Config() config.Config { return a.config }
 // ConfigWarnings returns non-fatal configuration problems.
 func (a *App) ConfigWarnings() []string {
 	return append([]string(nil), a.configWarnings...)
+}
+
+// State returns a copy of the loaded project state.
+func (a *App) State() state.State {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	current := a.state
+	current.RecentProjects = append([]state.RecentProject(nil), current.RecentProjects...)
+	current.PinnedExternalProjects = append([]string(nil), current.PinnedExternalProjects...)
+	return current
+}
+
+// RecordProjectOpen makes a project active and moves it to the front of the
+// recent list. Project files are referenced, never copied.
+func (a *App) RecordProjectOpen(projectPath, workspacePath string) error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+
+	current := a.state
+	current.SchemaVersion = state.CurrentSchemaVersion
+	current.ActiveProject = projectPath
+	current.ActiveWorkspace = workspacePath
+	recent := []state.RecentProject{{Path: projectPath, LastOpened: time.Now().UTC()}}
+	for _, entry := range current.RecentProjects {
+		if entry.Path == projectPath {
+			continue
+		}
+		recent = append(recent, entry)
+		if len(recent) == 10 {
+			break
+		}
+	}
+	current.RecentProjects = recent
+	if current.PinnedExternalProjects == nil {
+		current.PinnedExternalProjects = []string{}
+	}
+	if err := a.stateStore.Save(current); err != nil {
+		return fmt.Errorf("save project state: %w", err)
+	}
+	a.state = current
+	return nil
 }
 
 // PackageManager returns the detected package manager, if any.

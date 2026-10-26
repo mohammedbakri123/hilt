@@ -55,7 +55,8 @@ Phase 3 project discovery provides:
   selected project across refreshes, supports `/` filtering, marks external
   projects, and shows declared metadata in a sticky detail pane at wide widths.
   Project tabs cover Overview, Packages, Data, and Output; tabs without a
-  backend yet show explicit empty states.
+  backend yet show explicit empty states. Pressing `enter` marks a project
+  active and records it on Home; project files are referenced, never copied.
 
 Not implemented: MSBuild evaluation, builds, run/test execution, `global.json`
 writes, NuGet operations, and templates. Empty project tabs state each gap

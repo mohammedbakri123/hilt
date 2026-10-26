@@ -143,8 +143,9 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
 	ctxProjects: {CompactWidth: 90, Bindings: []keyBinding{
-		{Key: "[/]", Action: actionNavigate, Label: "section", Compact: true},
+		{Key: "[/]", Action: actionNavigate, Label: "section"},
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "activate", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},
@@ -153,9 +154,10 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
 	ctxProjectSplit: {CompactWidth: 120, Bindings: []keyBinding{
-		{Key: "[/]", Action: actionNavigate, Label: "section", Compact: true},
+		{Key: "[/]", Action: actionNavigate, Label: "section"},
 		{Key: "tab", Action: actionSwitchFocus, Label: "focus", Compact: true},
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "activate", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
@@ -184,8 +186,8 @@ var keymap = map[keyContext]keyContextSpec{
 	ctxHelpNavigation: {Bindings: []keyBinding{
 		{Key: "1-5", Action: actionJump, Label: "jump", Help: "jump to a section"},
 		{Key: "[ / ]", Action: actionNavigate, Label: "section", Help: "previous / next section"},
-		{Key: "tab", Action: actionSwitchFocus, Label: "focus", Help: "switch focus inside a screen"},
-		{Key: "↑/↓  j/k", Action: actionMove, Label: "move", Help: "move inside the focused list"},
+		{Key: "tab", Action: actionSwitchFocus, Label: "focus", Help: "switch focus; arrows move the focused list"},
+		{Key: "enter", Action: actionConfirm, Label: "open", Help: "activate project / confirm prompt"},
 		{Key: "/", Action: actionFilter, Label: "filter", Help: "filter the current list"},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Help: "previous / next project tab"},
 	}},

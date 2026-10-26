@@ -293,6 +293,30 @@ func (m Model) maxFocusedScroll() int {
 	return m.projectListContentHeight()
 }
 
+func (m Model) openProjectCmd(project projects.Project) tea.Cmd {
+	workspace := m.workspaceFor(project.Path)
+	return func() tea.Msg {
+		return projectOpenedMsg{
+			project: project,
+			err:     m.backend.RecordProjectOpen(project.Path, workspace),
+		}
+	}
+}
+
+func (m Model) workspaceFor(projectPath string) string {
+	if m.projectResult == nil {
+		return ""
+	}
+	for _, workspace := range m.projectResult.Workspaces {
+		for _, path := range workspace.ProjectPaths {
+			if path == projectPath {
+				return workspace.Path
+			}
+		}
+	}
+	return ""
+}
+
 func (m Model) selectedProject() (projects.Project, bool) {
 	projectsList := m.filteredProjects()
 	if len(projectsList) == 0 {

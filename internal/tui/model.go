@@ -18,6 +18,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/projects"
+	"github.com/mohammedbakri123/hilt/internal/state"
 )
 
 // Backend is the data and managed-operation surface the TUI needs.
@@ -27,6 +28,8 @@ type Backend interface {
 	Paths() platform.Paths
 	Config() config.Config
 	ConfigWarnings() []string
+	State() state.State
+	RecordProjectOpen(projectPath, workspacePath string) error
 	PackageManager() *platform.PackageManager
 	Inventory(ctx context.Context) (dotnet.Inventory, error)
 	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
@@ -87,6 +90,11 @@ type inventoryMsg struct {
 
 type doctorMsg struct {
 	report diagnostics.Report
+}
+
+type projectOpenedMsg struct {
+	project projects.Project
+	err     error
 }
 
 type projectsMsg struct {
@@ -411,6 +419,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case projectsMsg:
 		return m.handleProjectsMsg(message)
 
+	case projectOpenedMsg:
+		if message.err != nil {
+			m.setStatus("Could not remember project: "+message.err.Error(), true)
+			return m, nil
+		}
+		m.setStatus("Active project: "+message.project.Name+".", false)
+		return m, nil
+
 	case doctorMsg:
 		m.loadingDoctor = false
 		report := message.report
@@ -570,6 +586,13 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			m.moveProject(1)
 			return m, nil
+		case "enter":
+			project, ok := m.selectedProject()
+			if !ok {
+				m.setStatus("Select a project first.", false)
+				return m, nil
+			}
+			return m, m.openProjectCmd(project)
 		}
 	}
 

@@ -17,6 +17,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/projects"
+	"github.com/mohammedbakri123/hilt/internal/state"
 )
 
 type fakeBackend struct {
@@ -57,6 +58,10 @@ func (f fakeBackend) Version() string       { return "test" }
 func (f fakeBackend) Config() config.Config { return config.Config{} }
 func (f fakeBackend) Paths() platform.Paths { return platform.Paths{} }
 func (f fakeBackend) ConfigWarnings() []string {
+	return nil
+}
+func (f fakeBackend) State() state.State { return state.Defaults() }
+func (f fakeBackend) RecordProjectOpen(string, string) error {
 	return nil
 }
 func (f fakeBackend) PackageManager() *platform.PackageManager { return nil }

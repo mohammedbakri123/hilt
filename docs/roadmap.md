@@ -57,10 +57,11 @@ Implemented:
 - Five-section TUI navigation, a global status line, a keymap-backed footer and
   help view, and a project cockpit with list/detail panes, filtering, external
   badges, and Overview/Packages/Data/Output tabs.
+- Active and recent project state persisted through the versioned state store.
 
 Remaining:
 
-- Wire the state store into the TUI for active and recent projects.
+- Persist the last build/run target and output once execution lands.
 - Evaluated properties through MSBuild when available; declared-only values
   labeled as such.
 - Build, clean, restore, run, stop, and test with streaming output.

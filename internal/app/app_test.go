@@ -11,6 +11,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/projects"
+	"github.com/mohammedbakri123/hilt/internal/state"
 )
 
 func TestNewUsesHiltHomeAndDefaults(t *testing.T) {
@@ -402,5 +403,78 @@ func TestNewCreatesHiltLayout(t *testing.T) {
 	}
 	if len(result.Projects) != 0 {
 		t.Errorf("projects = %+v, want none", result.Projects)
+	}
+}
+
+func TestRecordProjectOpenPersistsState(t *testing.T) {
+	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", hiltHome)
+
+	application := New("test")
+	first := filepath.Join(hiltHome, "apps", "Shop", "Shop.csproj")
+	firstWorkspace := filepath.Join(hiltHome, "apps", "Shop", "Shop.sln")
+	if err := application.RecordProjectOpen(first, firstWorkspace); err != nil {
+		t.Fatal(err)
+	}
+	second := filepath.Join(hiltHome, "apps", "Library", "Library.csproj")
+	if err := application.RecordProjectOpen(second, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := application.RecordProjectOpen(first, firstWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	value := application.State()
+	if value.ActiveProject != first || value.ActiveWorkspace != firstWorkspace {
+		t.Fatalf("active state = %+v", value)
+	}
+	if len(value.RecentProjects) != 2 || value.RecentProjects[0].Path != first || value.RecentProjects[1].Path != second {
+		t.Fatalf("recent projects = %+v", value.RecentProjects)
+	}
+
+	store := state.Store{Path: application.Paths().StateFile()}
+	loaded, warnings, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if loaded.ActiveProject != first || len(loaded.RecentProjects) != 2 {
+		t.Fatalf("loaded state = %+v", loaded)
+	}
+	info, err := os.Stat(application.Paths().StateFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("state mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestNewSurfacesCorruptState(t *testing.T) {
+	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
+	stateDir := filepath.Join(hiltHome, ".hilt")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "state.json"), []byte("{bad"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", hiltHome)
+
+	application := New("test")
+	found := false
+	for _, warning := range application.ConfigWarnings() {
+		if strings.Contains(warning, "state") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("state warning missing: %v", application.ConfigWarnings())
 	}
 }

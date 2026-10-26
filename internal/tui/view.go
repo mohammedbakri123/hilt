@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -402,6 +403,19 @@ func (m Model) homeLines(width int) []string {
 		projectRoot = "not configured"
 	}
 	projectContent := []string{kvSized("Projects root", projectRoot, 14)}
+	currentState := m.backend.State()
+	if currentState.ActiveProject != "" {
+		projectContent = append(projectContent, kvSized("Active project", currentState.ActiveProject, 14))
+	}
+	if len(currentState.RecentProjects) > 0 {
+		projectContent = append(projectContent, kvSized("Recent projects", fmt.Sprintf("%d", len(currentState.RecentProjects)), 14))
+		for index, recent := range currentState.RecentProjects {
+			if index == 3 {
+				break
+			}
+			projectContent = append(projectContent, "  "+styleMuted.Render(filepath.Base(recent.Path)))
+		}
+	}
 	switch {
 	case m.projectsLoading:
 		projectContent = append(projectContent, m.spinner.View()+" scanning projects...")

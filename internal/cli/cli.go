@@ -16,6 +16,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/projects"
+	"github.com/mohammedbakri123/hilt/internal/state"
 )
 
 // Backend is the application surface used by the CLI.
@@ -25,6 +26,8 @@ type Backend interface {
 	Paths() platform.Paths
 	Config() config.Config
 	ConfigWarnings() []string
+	State() state.State
+	RecordProjectOpen(projectPath, workspacePath string) error
 	PackageManager() *platform.PackageManager
 	Inventory(ctx context.Context) (dotnet.Inventory, error)
 	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
