@@ -32,6 +32,9 @@ const (
 	actionResolve         keyAction = "resolve"
 	actionFilter          keyAction = "filter"
 	actionProjectTab      keyAction = "project-tab"
+	actionBuild           keyAction = "build"
+	actionToggleOutput    keyAction = "toggle-output"
+	actionFollowOutput    keyAction = "follow-output"
 )
 
 type keyContext string
@@ -53,6 +56,7 @@ const (
 	ctxProjectSplit    keyContext = "project-split"
 	ctxProjectFilter   keyContext = "project-filter"
 	ctxSettings        keyContext = "settings"
+	ctxOutput          keyContext = "output"
 	ctxNarrow          keyContext = "narrow"
 	ctxHelpNavigation  keyContext = "help-navigation"
 	ctxHelpManaged     keyContext = "help-managed"
@@ -146,9 +150,10 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "[/]", Action: actionNavigate, Label: "section"},
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
 		{Key: "enter", Action: actionConfirm, Label: "activate", Compact: true},
+		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
-		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},
+		{Key: ", .", Action: actionProjectTab, Label: "tab"},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
@@ -158,10 +163,19 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "tab", Action: actionSwitchFocus, Label: "focus", Compact: true},
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
 		{Key: "enter", Action: actionConfirm, Label: "activate", Compact: true},
+		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
+		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
+		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
+	}},
+	ctxOutput: {CompactWidth: 72, Bindings: []keyBinding{
+		{Key: "o", Action: actionToggleOutput, Label: "close", Compact: true},
+		{Key: "f", Action: actionFollowOutput, Label: "follow", Compact: true},
+		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll", Compact: true},
+		{Key: "home/end", Action: actionScroll, Label: "top/bottom", Compact: true},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
@@ -200,7 +214,10 @@ var keymap = map[keyContext]keyContextSpec{
 	ctxHelpView: {Bindings: []keyBinding{
 		{Key: "r", Action: actionRefresh, Label: "refresh", Help: "refresh inventory"},
 		{Key: "d", Action: actionDoctor, Label: "doctor", Help: "run diagnostics"},
-		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll", Help: "scroll content"},
+		{Key: "b", Action: actionBuild, Label: "build", Help: "build the selected project"},
+		{Key: "o", Action: actionToggleOutput, Label: "output", Help: "open or close the output drawer"},
+		{Key: "f", Action: actionFollowOutput, Label: "follow", Help: "follow or pause output"},
+		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll", Help: "scroll content or output"},
 		{Key: "? / esc", Action: actionCloseHelp, Label: "close", Help: "close help"},
 		{Key: "q  ctrl+c", Action: actionQuit, Label: "quit", Help: "quit Hilt"},
 	}},
@@ -228,6 +245,16 @@ func footerBindings(context keyContext, width int) []keyBinding {
 			}
 		}
 		bindings = compact
+	}
+	if context == ctxOutput && width < 72 {
+		narrow := make([]keyBinding, 0, 4)
+		for _, binding := range bindings {
+			switch binding.Action {
+			case actionToggleOutput, actionFollowOutput, actionHelp, actionQuit:
+				narrow = append(narrow, binding)
+			}
+		}
+		bindings = narrow
 	}
 	if width < 56 && len(bindings) > 3 {
 		bindings = keymap[ctxNarrow].Bindings

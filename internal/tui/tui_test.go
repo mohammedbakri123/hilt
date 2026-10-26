@@ -1532,6 +1532,9 @@ func TestFooterMatchesKeymap(t *testing.T) {
 	backend.projectResult = projectFixture()
 	projects := openProjects(t, backend, 160, 40)
 
+	drawer := loadedModel(t, newFakeBackend(), 160, 40)
+	drawer.drawer.open = true
+
 	tests := []struct {
 		name    string
 		model   Model
@@ -1551,6 +1554,7 @@ func TestFooterMatchesKeymap(t *testing.T) {
 		{name: "projects", model: openProjects(t, backend, 110, 30), context: ctxProjects},
 		{name: "project split", model: projects, context: ctxProjectSplit},
 		{name: "project filter", model: projectFiltering, context: ctxProjectFilter},
+		{name: "output", model: drawer, context: ctxOutput},
 		{name: "settings", model: settings, context: ctxSettings},
 	}
 	for _, test := range tests {
@@ -1925,5 +1929,96 @@ func TestProjectTabsResetDetailScroll(t *testing.T) {
 	model = press(t, model, key('.', "."))
 	if model.projectDetailScroll != 0 {
 		t.Fatalf("tab change kept detail scroll %d", model.projectDetailScroll)
+	}
+}
+
+func TestOutputDrawerStartsClosedAndToggles(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	if model.drawer.open {
+		t.Fatal("output drawer should start closed")
+	}
+	if strings.Contains(ansi.Strip(model.View().Content), "No build output yet") {
+		t.Fatal("closed drawer should not render its body")
+	}
+
+	model = press(t, model, key('o', "o"))
+	if !model.drawer.open {
+		t.Fatal("o should open the output drawer")
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"OUTPUT", "[follow]", "No build output yet", "o close"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("open drawer missing %q", want)
+		}
+	}
+
+	model = press(t, model, key('o', "o"))
+	if model.drawer.open {
+		t.Fatal("o should close the output drawer")
+	}
+	model = press(t, model, key('o', "o"))
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.drawer.open {
+		t.Fatal("esc should close the output drawer")
+	}
+}
+
+func TestOutputDrawerFitsLayouts(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{60, 20}, {80, 24}, {160, 48}} {
+		model := loadedModel(t, newFakeBackend(), size.width, size.height)
+		model = press(t, model, key('o', "o"))
+		if model.drawerHeight() == 0 {
+			t.Fatalf("%dx%d: drawer has no height", size.width, size.height)
+		}
+		if model.bodyHeight() < 3 {
+			t.Fatalf("%dx%d: body height = %d", size.width, size.height, model.bodyHeight())
+		}
+		lines := strings.Split(model.View().Content, "\n")
+		if len(lines) != size.height {
+			t.Errorf("%dx%d: got %d lines, want %d", size.width, size.height, len(lines), size.height)
+		}
+		for index, line := range lines {
+			if width := ansi.StringWidth(line); width > size.width {
+				t.Errorf("%dx%d: line %d width %d: %q", size.width, size.height, index, width, line)
+			}
+		}
+		titleLine := 3 + model.bodyHeight()
+		if titleLine >= len(lines) || !strings.Contains(ansi.Strip(lines[titleLine]), "OUTPUT") {
+			t.Fatalf("%dx%d: drawer title not at line %d:\n%s", size.width, size.height, titleLine, ansi.Strip(model.View().Content))
+		}
+		footer := ansi.Strip(lines[len(lines)-1])
+		if !strings.Contains(footer, "o close") || !strings.Contains(footer, "q quit") {
+			t.Errorf("%dx%d: drawer footer = %q", size.width, size.height, footer)
+		}
+	}
+}
+
+func TestOutputDrawerFollowAndScroll(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 80, 24)
+	model.drawer.open = true
+	for index := 0; index < 40; index++ {
+		model.appendDrawerLine(fmt.Sprintf("line %02d", index))
+	}
+	if !model.drawer.follow {
+		t.Fatal("appending while following should keep follow enabled")
+	}
+	if offset := model.drawerOffset(); offset != model.drawerMaxScroll() {
+		t.Fatalf("follow offset = %d, want %d", offset, model.drawerMaxScroll())
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if model.drawer.follow {
+		t.Fatal("pgup should pause follow")
+	}
+	model = press(t, model, key('f', "f"))
+	if !model.drawer.follow {
+		t.Fatal("f should resume follow")
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyHome})
+	if model.drawer.follow || model.drawerOffset() != 0 {
+		t.Fatal("home should pause follow at the top")
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnd})
+	if !model.drawer.follow {
+		t.Fatal("end should resume follow")
 	}
 }

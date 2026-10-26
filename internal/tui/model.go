@@ -188,6 +188,8 @@ type Model struct {
 	statusMessage string
 	statusIsError bool
 
+	drawer outputDrawer
+
 	spinner spinner.Model
 }
 
@@ -200,6 +202,7 @@ func Now(backend Backend) Model {
 		width:            80,
 		height:           24,
 		loadingInventory: true,
+		drawer:           newOutputDrawer(),
 		spinner:          spinner.New(spinner.WithSpinner(spinner.Dot)),
 	}
 }
@@ -488,6 +491,45 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.screen == ScreenProjects && key == "esc" && m.projectFilter != "" {
 		m.setProjectFilter("")
 		m.projectFiltering = false
+		return m, nil
+	}
+
+	if m.drawer.open {
+		switch key {
+		case "o":
+			m.drawer.open = false
+			return m, nil
+		case "f":
+			if m.drawer.follow {
+				m.drawer.follow = false
+				m.clampDrawerScroll()
+			} else {
+				m.followDrawer()
+			}
+			return m, nil
+		case "esc":
+			m.drawer.open = false
+			return m, nil
+		case "pgup", "ctrl+u":
+			m.scrollDrawerBy(-8)
+			return m, nil
+		case "pgdown", "ctrl+d":
+			m.scrollDrawerBy(8)
+			return m, nil
+		case "home":
+			m.setDrawerScroll(0)
+			return m, nil
+		case "end":
+			m.followDrawer()
+			return m, nil
+		}
+	}
+
+	if key == "o" {
+		m.drawer.open = true
+		if m.drawer.follow {
+			m.followDrawer()
+		}
 		return m, nil
 	}
 
@@ -868,7 +910,7 @@ func (m Model) bodyHeight() int {
 	if height <= 0 {
 		height = 24
 	}
-	body := height - 4
+	body := height - 4 - m.drawerHeight()
 	if body < 3 {
 		body = 3
 	}

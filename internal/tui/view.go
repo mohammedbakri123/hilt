@@ -46,10 +46,7 @@ func (m Model) render(width, height int) string {
 	header := m.renderHeader(width)
 	status := m.renderStatusLine(width)
 	footer := m.renderFooter(width)
-	bodyHeight := height - lipgloss.Height(header) - lipgloss.Height(status) - lipgloss.Height(footer)
-	if bodyHeight < 3 {
-		bodyHeight = 3
-	}
+	bodyHeight := m.bodyHeight()
 
 	innerWidth := m.contentWidth()
 	lines := m.screenLines(innerWidth)
@@ -71,13 +68,22 @@ func (m Model) render(width, height int) string {
 	}
 	main := strings.Join(prefixed, "\n")
 
+	drawer := strings.Join(m.renderDrawer(width), "\n")
 	var content string
 	if !m.showSidebar() {
-		content = lipgloss.JoinVertical(lipgloss.Left, header, main, status, footer)
+		if drawer != "" {
+			content = lipgloss.JoinVertical(lipgloss.Left, header, main, drawer, status, footer)
+		} else {
+			content = lipgloss.JoinVertical(lipgloss.Left, header, main, status, footer)
+		}
 	} else {
 		sidebar := m.renderSidebar(bodyHeight)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
-		content = lipgloss.JoinVertical(lipgloss.Left, header, body, status, footer)
+		if drawer != "" {
+			content = lipgloss.JoinVertical(lipgloss.Left, header, body, drawer, status, footer)
+		} else {
+			content = lipgloss.JoinVertical(lipgloss.Left, header, body, status, footer)
+		}
 	}
 	if m.quitConfirm {
 		content = overlayCentered(content, m.renderQuitDialog(width), width, height)
@@ -231,6 +237,8 @@ func (m Model) footerContext() keyContext {
 		return ctxPromptRuntime
 	case m.confirm != confirmNone:
 		return ctxConfirm
+	case m.drawer.open && !m.projectFiltering:
+		return ctxOutput
 	case m.screen == ScreenHome:
 		return ctxHome
 	case m.screen == ScreenSDKs:
@@ -255,14 +263,18 @@ func (m Model) footerContext() keyContext {
 func (m Model) renderFooter(width int) string {
 	hints := footerBindings(m.footerContext(), width)
 	parts := make([]string, 0, len(hints))
+	separator := "  "
+	if width < 120 {
+		separator = " "
+	}
 	for _, hint := range hints {
 		parts = append(parts, styleKey.Render(hint.Key)+" "+styleMuted.Render(hint.Label))
 	}
-	return fitLine(" "+strings.Join(parts, "  "), width)
+	return fitLine(" "+strings.Join(parts, separator), width)
 }
 
 func (m Model) renderHelp(width, height int) string {
-	content := []string{styleTitle.Render("Keyboard shortcuts"), ""}
+	content := []string{styleTitle.Render("Keyboard shortcuts")}
 	sections := []struct {
 		title   string
 		context keyContext
@@ -271,10 +283,7 @@ func (m Model) renderHelp(width, height int) string {
 		{title: "MANAGED .NET", context: ctxHelpManaged},
 		{title: "VIEW", context: ctxHelpView},
 	}
-	for index, section := range sections {
-		if index > 0 {
-			content = append(content, "")
-		}
+	for _, section := range sections {
 		content = append(content, styleLabel.Render(section.title))
 		for _, binding := range bindingsFor(section.context) {
 			help := binding.Help
@@ -780,7 +789,7 @@ func (m Model) projectTabContent(project projects.Project, width int) []string {
 		return []string{
 			styleMuted.Render("No build or run output yet."),
 			"",
-			styleMuted.Render("Build and run actions are not available yet. Output will stream here."),
+			styleMuted.Render("Press o to open the output drawer."),
 		}
 	}
 	return m.projectDetailContent(project, width)
