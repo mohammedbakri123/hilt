@@ -814,7 +814,7 @@ func (m Model) bodyHeight() int {
 	if height <= 0 {
 		height = 24
 	}
-	body := height - 3
+	body := height - 4
 	if body < 3 {
 		body = 3
 	}
