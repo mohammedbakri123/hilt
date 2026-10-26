@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -23,6 +25,19 @@ const (
 	defaultMetadataBaseURL = "https://builds.dotnet.microsoft.com/dotnet/release-metadata"
 	maxMetadataBytes       = 16 << 20
 )
+
+// metadataBaseURLCandidates is the ordered list of Microsoft metadata hosts
+// tried when no explicit base URL is configured. The blob mirror is first
+// because the canonical builds host is unreachable from some networks.
+var metadataBaseURLCandidates = []string{
+	"https://dotnetcli.blob.core.windows.net/dotnet/release-metadata",
+	"https://dotnetcli.azureedge.net/dotnet/release-metadata",
+	"https://builds.dotnet.microsoft.com/dotnet/release-metadata",
+}
+
+// metadataMirrorTimeout bounds each mirror attempt so one unreachable host
+// cannot stall resolution for the whole timeout budget.
+const metadataMirrorTimeout = 15 * time.Second
 
 // Artifact describes a downloadable SDK archive.
 type Artifact struct {
@@ -179,6 +194,7 @@ func (c *ReleaseClient) ResolveSDK(ctx context.Context, version, rid string) (Ar
 	if err != nil {
 		return Artifact{}, fmt.Errorf("parse SDK archive URL: %w", err)
 	}
+	mirrorArchiveHost(archiveURL)
 	if err := c.validator()(archiveURL); err != nil {
 		return Artifact{}, err
 	}
@@ -252,6 +268,7 @@ func (c *ReleaseClient) ResolveRuntime(ctx context.Context, version, product, ri
 	if err != nil {
 		return Artifact{}, fmt.Errorf("parse %s archive URL: %w", metadataProductLabel(product), err)
 	}
+	mirrorArchiveHost(archiveURL)
 	if err := c.validator()(archiveURL); err != nil {
 		return Artifact{}, err
 	}
@@ -316,31 +333,47 @@ func (c *ReleaseClient) channel(ctx context.Context, channel string) (releaseMet
 }
 
 func (c *ReleaseClient) fetchChannel(ctx context.Context, channel string) (releaseMetadata, error) {
-	baseURL := strings.TrimRight(c.BaseURL, "/")
-	if baseURL == "" {
-		baseURL = defaultMetadataBaseURL
+	var lastErr error
+	for _, baseURL := range c.metadataBaseURLs() {
+		metadataURL := strings.TrimRight(baseURL, "/") + "/" + channel + "/releases.json"
+		parsedURL, err := url.Parse(metadataURL)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := c.validator()(parsedURL); err != nil {
+			lastErr = err
+			continue
+		}
+		fetchCtx, cancel := context.WithTimeout(ctx, metadataMirrorTimeout)
+		data, err := c.fetch(fetchCtx, parsedURL, maxMetadataBytes)
+		cancel()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var metadata releaseMetadata
+		if err := json.Unmarshal(data, &metadata); err != nil {
+			lastErr = fmt.Errorf("parse release metadata: %w", err)
+			continue
+		}
+		return metadata, nil
 	}
-	metadataURL := baseURL + "/" + channel + "/releases.json"
-	parsedURL, err := url.Parse(metadataURL)
-	if err != nil {
-		return releaseMetadata{}, fmt.Errorf("parse release metadata URL: %w", err)
+	if lastErr == nil {
+		lastErr = errors.New("no metadata mirrors available")
 	}
-	if err := c.validator()(parsedURL); err != nil {
-		return releaseMetadata{}, err
-	}
+	return releaseMetadata{}, lastErr
+}
 
-	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	data, err := c.fetch(fetchCtx, parsedURL, maxMetadataBytes)
-	if err != nil {
-		return releaseMetadata{}, err
+// metadataBaseURLs returns the ordered metadata hosts to try.
+func (c *ReleaseClient) metadataBaseURLs() []string {
+	if env := strings.TrimSpace(os.Getenv("HILT_METADATA_BASE")); env != "" {
+		return []string{strings.TrimRight(env, "/")}
 	}
-
-	var metadata releaseMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return releaseMetadata{}, fmt.Errorf("parse release metadata: %w", err)
+	if c.BaseURL != "" {
+		return []string{strings.TrimRight(c.BaseURL, "/")}
 	}
-	return metadata, nil
+	return metadataBaseURLCandidates
 }
 
 // releaseIndex caches the cross-channel release index.
@@ -350,34 +383,41 @@ func (c *ReleaseClient) index(ctx context.Context) (releaseIndex, error) {
 	if c.releaseIndex != nil {
 		return *c.releaseIndex, nil
 	}
-	baseURL := strings.TrimRight(c.BaseURL, "/")
-	if baseURL == "" {
-		baseURL = defaultMetadataBaseURL
+	var lastErr error
+	for _, baseURL := range c.metadataBaseURLs() {
+		indexURL := strings.TrimRight(baseURL, "/") + "/releases-index.json"
+		parsedURL, err := url.Parse(indexURL)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := c.validator()(parsedURL); err != nil {
+			lastErr = err
+			continue
+		}
+		fetchCtx, cancel := context.WithTimeout(ctx, metadataMirrorTimeout)
+		data, err := c.fetch(fetchCtx, parsedURL, maxMetadataBytes)
+		cancel()
+		if err != nil {
+			lastErr = fmt.Errorf("fetch release index: %w", err)
+			continue
+		}
+		var parsed releaseIndex
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			lastErr = fmt.Errorf("parse release index: %w", err)
+			continue
+		}
+		if len(parsed.Channels) == 0 {
+			lastErr = fmt.Errorf("parse release index: no channels were found")
+			continue
+		}
+		c.releaseIndex = &parsed
+		return parsed, nil
 	}
-	indexURL := baseURL + "/releases-index.json"
-	parsedURL, err := url.Parse(indexURL)
-	if err != nil {
-		return releaseIndex{}, fmt.Errorf("parse release index URL: %w", err)
+	if lastErr == nil {
+		lastErr = errors.New("no metadata mirrors available")
 	}
-	if err := c.validator()(parsedURL); err != nil {
-		return releaseIndex{}, err
-	}
-
-	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	data, err := c.fetch(fetchCtx, parsedURL, maxMetadataBytes)
-	if err != nil {
-		return releaseIndex{}, fmt.Errorf("fetch release index: %w", err)
-	}
-	var parsed releaseIndex
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return releaseIndex{}, fmt.Errorf("parse release index: %w", err)
-	}
-	if len(parsed.Channels) == 0 {
-		return releaseIndex{}, fmt.Errorf("parse release index: no channels were found")
-	}
-	c.releaseIndex = &parsed
-	return parsed, nil
+	return releaseIndex{}, lastErr
 }
 
 // productReleases returns the singular and plural metadata entries carrying
@@ -649,10 +689,24 @@ func (c *ReleaseClient) validator() func(*url.URL) error {
 
 func defaultTransport() *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport.DialContext = dialer.DialContext
 	transport.TLSHandshakeTimeout = 10 * time.Second
 	transport.ResponseHeaderTimeout = 30 * time.Second
 	transport.IdleConnTimeout = 90 * time.Second
 	return transport
+}
+
+// mirrorArchiveHost rewrites the canonical Microsoft builds host to a reachable
+// mirror host, preserving the path. The canonical host is unreachable from some
+// networks even though its archives are mirrored byte-for-byte.
+func mirrorArchiveHost(target *url.URL) {
+	if target == nil {
+		return
+	}
+	if strings.EqualFold(target.Hostname(), "builds.dotnet.microsoft.com") {
+		target.Host = "dotnetcli.blob.core.windows.net"
+	}
 }
 
 // ValidateMicrosoftURL restricts downloads to Microsoft HTTPS hosts.

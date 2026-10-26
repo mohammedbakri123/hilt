@@ -598,7 +598,111 @@ func (i Installer) Remove(ctx context.Context, version string) (Removal, error) 
 	}, nil
 }
 
+// downloadHTTPError reports a non-2xx HTTP response from an archive download.
+type downloadHTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *downloadHTTPError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("HTTP %d", e.Status)
+	}
+	return fmt.Sprintf("HTTP %d: %s", e.Status, e.Body)
+}
+
+// archiveMirrorHosts is the ordered list of Microsoft archive hosts. The blob
+// mirror is first because the canonical builds host is unreachable from some
+// networks.
+var archiveMirrorHosts = []string{
+	"dotnetcli.blob.core.windows.net",
+	"dotnetcli.azureedge.net",
+	"builds.dotnet.microsoft.com",
+}
+
+// archiveMirrorURLs returns the ordered archive hosts to try for a URL.
+func archiveMirrorURLs(rawURL string) []string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return []string{rawURL}
+	}
+	host := strings.ToLower(parsed.Hostname())
+	known := false
+	for _, candidate := range archiveMirrorHosts {
+		if strings.EqualFold(parsed.Host, candidate) || strings.EqualFold(host, candidate) {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return []string{rawURL}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, h := range archiveMirrorHosts {
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		clone := *parsed
+		clone.Host = h
+		out = append(out, clone.String())
+	}
+	return out
+}
+
+func isRetryableDownloadError(err error) bool {
+	var httpErr *downloadHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Status >= 500 || httpErr.Status == 429 || httpErr.Status == 408
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return true
+	}
+	var netErr interface{ Timeout() bool }
+	if errors.As(err, &netErr) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{"connection", "timeout", "eof", "reset by peer", "no such host"} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// download tries the available archive mirrors in order. It returns on the
+// first success. Retryable network/HTTP errors move to the next mirror;
+// checksum mismatches and other terminal errors are returned immediately.
 func (i Installer) download(ctx context.Context, rawURL string, expected []byte, directory string, progress io.Writer, label string) (string, error) {
+	candidates := archiveMirrorURLs(rawURL)
+	var lastErr error
+	for idx, candidate := range candidates {
+		if idx > 0 {
+			progressf(progress, "Retrying %s on alternate mirror", label)
+		}
+		name, err := i.downloadOne(ctx, candidate, expected, directory, progress, label)
+		if err == nil {
+			return name, nil
+		}
+		lastErr = err
+		var mismatch *ChecksumMismatchError
+		if errors.As(err, &mismatch) {
+			return "", err
+		}
+		if !isRetryableDownloadError(err) {
+			return "", err
+		}
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no archive mirrors available")
+	}
+	return "", lastErr
+}
+
+func (i Installer) downloadOne(ctx context.Context, rawURL string, expected []byte, directory string, progress io.Writer, label string) (string, error) {
 	target, err := url.Parse(rawURL)
 	if err != nil {
 		return "", fmt.Errorf("parse %s archive URL: %w", label, err)
@@ -632,7 +736,7 @@ func (i Installer) download(ctx context.Context, rawURL string, expected []byte,
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		snippet, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-		return "", fmt.Errorf("download %s archive: %s: %s", label, response.Status, strings.TrimSpace(string(snippet)))
+		return "", &downloadHTTPError{Status: response.StatusCode, Body: strings.TrimSpace(string(snippet))}
 	}
 	limit := i.maxDownloadBytes()
 	if response.ContentLength > limit {
