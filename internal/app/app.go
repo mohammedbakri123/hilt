@@ -578,6 +578,19 @@ func (a *App) Diagnose(ctx context.Context) diagnostics.Report {
 	})
 }
 
+// Compile-time assertions: *App must satisfy both consumer interfaces so they
+// cannot silently diverge from the implementation.
+var _ interface {
+	Version() string
+	Platform() platform.Info
+	Paths() platform.Paths
+	Config() config.Config
+	ConfigWarnings() []string
+	Inventory(ctx context.Context) (dotnet.Inventory, error)
+	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
+	Diagnose(ctx context.Context) diagnostics.Report
+} = (*App)(nil)
+
 func legacyDataWarnings(paths platform.Paths, getenv func(string) string, home string) []string {
 	legacyRoot := legacyXDGDir(getenv("XDG_DATA_HOME"), home, ".local/share")
 	legacyManifest := filepath.Join(legacyRoot, "hilt", "installs.json")
