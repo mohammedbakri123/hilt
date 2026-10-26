@@ -18,7 +18,7 @@ Phase 1 provides:
 - `hilt doctor` with human and JSON output.
 - `hilt sdk list`, `hilt sdk which`, `hilt runtime list`, and `hilt version`
   with JSON output.
-- XDG configuration loading with corrupt-file preservation.
+- A single Hilt home at `~/hilt` with corrupt-file preservation.
 
 Phase 2 managed SDKs provide:
 
@@ -44,7 +44,8 @@ Phase 2 managed SDKs provide:
 Phase 3 project discovery provides:
 
 - `hilt projects list [--path <dir>] [--all] [--json]` discovers `.sln`,
-  `.slnx`, `.slnf`, and `.csproj` files without invoking MSBuild.
+  `.slnx`, `.slnf`, and `.csproj` files without invoking MSBuild. The default
+  root is `~/hilt/apps`; explicit `--path` values may point anywhere.
 - `hilt projects inspect <path> [--json]` reports declared target frameworks,
   SDK hints, output type, test-project hints, and project references.
 - Recursive scanning skips `bin`, `obj`, `.git`, and `node_modules` by default,
@@ -116,11 +117,12 @@ bin/hilt version
 `hilt` with no arguments and no attached terminal exits with code `2` instead of
 hanging. Commands for later phases are not registered until they work.
 
-Managed SDKs are installed at `<data>/hilt/dotnet/<version>`. The install
-manifest and lock live beside that directory at
-`<data>/hilt/installs.json` and `<data>/hilt/installs.lock`. Removal requires
-both a managed path and manifest ownership. An SDK copied into the managed root
-by hand is reported but cannot be removed by Hilt.
+Managed SDKs are installed at `<HILT_HOME>/.hilt/data/dotnet/<version>`. The
+install manifest and lock live beside that directory at
+`<HILT_HOME>/.hilt/data/installs.json` and
+`<HILT_HOME>/.hilt/data/installs.lock`. Removal requires both a managed path and
+manifest ownership. An SDK copied into the managed root by hand is reported but
+cannot be removed by Hilt.
 
 `hilt sdk available` reads official Microsoft release metadata and lists every
 stable patch version for the host RID from .NET 7.0 onward, newest first.
@@ -133,8 +135,10 @@ picker, downloads show a progress bar.
 release channel as each managed installation. It reports results only; it does
 not download or update anything.
 
-`hilt projects list` scans the current directory, a `--path` directory, or a
-single project/solution file. Directory names matching the configured
+`hilt projects list` scans `~/hilt/apps` by default, a `--path` directory, or a
+single project/solution file. Projects outside the Hilt home can be scanned or
+inspected explicitly; Hilt references them and never copies or moves them.
+Directory names matching the configured
 `scanExclusions` (default `bin`, `obj`, `.git`, `node_modules`) are skipped at
 any depth. `--all` also includes hidden files and directories. Declared values
 are shown as written; Hilt does not evaluate MSBuild conditions or properties.
@@ -151,19 +155,39 @@ are shown as written; Hilt does not evaluate MSBuild conditions or properties.
 Warnings do not change the exit code. JSON output includes every finding so
 scripts can apply stricter rules.
 
-## Configuration
+## Hilt home and configuration
 
-Configuration lives under XDG directories, with a `hilt` suffix:
+Hilt uses one user-owned home, `~/hilt` by default. Set `HILT_HOME` to an
+absolute path to move it. Relative overrides are ignored.
 
-- `$XDG_CONFIG_HOME/hilt/config.json` (default `~/.config/hilt`)
-- `$XDG_STATE_HOME/hilt` (default `~/.local/state/hilt`)
-- `$XDG_CACHE_HOME/hilt` (default `~/.cache/hilt`)
-- `$XDG_DATA_HOME/hilt` (default `~/.local/share/hilt`)
+```text
+~/hilt/
+  apps/                 projects created or adopted under the Hilt home
+  .hilt/
+    config.json         user configuration
+    state.json          active project, recents, and pinned external projects
+    cache/              disposable metadata
+    data/
+      installs.json     managed-install manifest
+      installs.lock     install lock
+      dotnet/           managed SDKs and runtimes
+    logs/               future build and run logs
+```
+
+- `Paths.ProjectsRoot` and the default project scan root are `~/hilt/apps`.
+- `HILT_HOME` applies to configuration, state, cache, data, logs, and the
+  managed toolchain root. XDG variables no longer select these locations.
+- Projects outside `~/hilt/apps` remain valid. Hilt records their paths but
+  never copies, moves, or rewrites them.
+- Existing projects are never migrated into the Hilt home automatically.
+- If a legacy XDG install manifest is present and the new manifest is not,
+  Hilt warns at startup. It does not move or delete the legacy data, so managed
+  installs are not lost silently.
 
 The configuration file is created only when a save is requested. Malformed
-files are moved to `config.json.corrupt-<timestamp>` and defaults are loaded.
-Unknown JSON fields are preserved on save. The data directory also holds the
-managed toolchains, install manifest, and install lock. See
+configuration and state files are moved to `.corrupt-<timestamp>` and defaults
+are loaded. Unknown configuration fields are preserved on save. Configuration
+and state writes are atomic with mode `0600`. See
 [docs/safety.md](docs/safety.md).
 
 ## Verification

@@ -15,15 +15,15 @@ It never modifies system or external installations.
   and reports the probe error instead of hiding it.
 - A missing .NET installation is a warning, never a startup failure.
 - A root is marked `managed` only when it is inside the configured managed root
-  (`<data>/hilt/dotnet` by default). `owned` requires an install-manifest entry.
-  System installations are never guessed to be managed.
+  (`<HILT_HOME>/.hilt/data/dotnet` by default). `owned` requires an
+  install-manifest entry. System installations are never guessed to be managed.
 - Duplicate SDK versions across roots produce a warning, not a failure.
 
 ## Managed SDK installs
 
 Hilt installs only exact stable SDK versions into
-`<data>/hilt/dotnet/<version>`. The manifest and lock are siblings of that
-directory: `installs.json` and `installs.lock`.
+`<HILT_HOME>/.hilt/data/dotnet/<version>`. The manifest and lock are siblings of
+that directory: `installs.json` and `installs.lock`.
 
 Installation behavior:
 
@@ -128,6 +128,16 @@ silently.
 
 ## Configuration and data
 
-Configuration is written only when a save is requested. Saves are atomic and
-mode `0600`; malformed files are preserved with a `.corrupt-*` suffix. The
-install manifest is also written atomically with mode `0600`.
+Hilt uses one user-owned home: `~/hilt`, or an absolute `HILT_HOME`. Projects
+live under `~/hilt/apps`; Hilt internals live under `~/hilt/.hilt`. Existing
+projects are never copied, moved, or rewritten. A project outside the Hilt home
+can be referenced by path and is never copied in.
+
+Configuration and state are written only when a save is requested. Saves are
+atomic and mode `0600`; malformed files are preserved with a `.corrupt-*`
+suffix. The install manifest is also written atomically with mode `0600`.
+
+The old XDG configuration/data locations are no longer used. Hilt does not
+migrate or delete them. If a legacy XDG install manifest is found and the new
+manifest is absent, Hilt reports a startup warning so managed installs are not
+lost silently.

@@ -15,9 +15,10 @@ internal/config          versioned JSON configuration with atomic saves
 internal/diagnostics     doctor engine and findings
 internal/dotnet          discovery, probing, inventory, global.json, versions
 internal/install         release metadata, archives, manifest, install/remove
-internal/platform        OS/distro detection, XDG paths, package managers
+internal/platform        OS/distro detection, HILT_HOME paths, package managers
 internal/process         external command execution with contexts and groups
 internal/projects        project/solution discovery and declared metadata
+internal/state           versioned active-project and recent-project state
 ```
 
 ## Dependency direction
@@ -33,7 +34,8 @@ cmd/hilt
   │     │     ├── internal/dotnet
   │     │     └── internal/process
   │     ├── internal/platform
-  │     └── internal/projects
+  │     ├── internal/projects
+  │     └── internal/state
   ├── internal/cli ──► internal/{config,diagnostics,dotnet,install,platform,projects}
   └── internal/tui ──► internal/{config,diagnostics,dotnet,platform,projects}
 ```
@@ -49,23 +51,27 @@ cmd/hilt
   It parses `.csproj`, `.sln`, `.slnx`, and `.slnf` with standard-library
   decoders and never invokes MSBuild or `dotnet`.
 - `internal/platform` and `internal/config` do not import higher-level packages.
+- `internal/state` persists only paths and UI selections. It does not import
+  project discovery, install, or process packages.
 - No package imports `internal/app`, which prevents composition cycles.
 
 ## Runtime flow
 
 1. `main` creates a signal-aware context and constructs `app.New`.
-2. `app.New` detects the platform, resolves XDG paths, loads configuration, and
-   wires the process runner, locator, prober, package-manager lookup, and
-   install manifest. The manifest supplies ownership and managed roots to the
-   locator.
+2. `app.New` detects the platform, resolves the Hilt home (`HILT_HOME` or
+   `~/hilt`), loads configuration, and wires the process runner, locator,
+   prober, package-manager lookup, and install manifest. The manifest supplies
+   ownership and managed roots to the locator. An empty
+   `defaultProjectDir` falls back to `<HILT_HOME>/apps`.
 3. The CLI either runs a non-interactive command or hands the backend to the
    TUI.
 4. Discovery runs in `tea.Cmd` / CLI command context, never in the TUI update
    loop. Missing .NET is represented as an empty inventory plus warnings.
 5. Diagnostics reuses the inventory and adds configuration, `global.json`,
    package-manager, git, and managed-root findings.
-6. `hilt projects list` walks the requested root with `filepath.WalkDir`,
-   applies configured directory exclusions, and parses project/solution files
+6. `hilt projects list` walks the requested root (default
+   `<HILT_HOME>/apps`) with `filepath.WalkDir`, applies configured directory
+   exclusions, and parses project/solution files
    without MSBuild. The TUI Projects screen runs the same scan in a `tea.Cmd`
    and preserves the selected project across refreshes.
 7. `hilt sdk available` reads the release index and channel metadata to list
@@ -83,11 +89,15 @@ cmd/hilt
 - External commands receive argument slices; no shell interpolation.
 - Every command takes a `context.Context`; cancellation kills the process group.
 - Parsers are exported so captured .NET output can be tested without .NET.
-- Configuration saves are atomic, mode `0600`, and preserve unknown fields.
+- Configuration and state saves are atomic, mode `0600`; configuration
+  preserves unknown fields.
+- Project discovery never writes state. State is written only by an explicit
+  future action such as opening a project.
 - The install manifest uses `schemaVersion: 2` (runtime-aware), stores roots relative to the
   managed root, and is written atomically with mode `0600`.
-- Managed SDKs live at `<managedRoot>/<version>`. Ownership comes from the
-  manifest, not from the path alone.
+- Managed SDKs live at `<managedRoot>/<version>`, where the default managed
+  root is `<HILT_HOME>/.hilt/data/dotnet`. Ownership comes from the manifest,
+  not from the path alone.
 - Install and removal operations are serialized by `installs.lock`.
 - Network access is confined to `internal/install`; ordinary tests use local
   HTTP servers.

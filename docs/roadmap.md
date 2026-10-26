@@ -2,9 +2,10 @@
 
 Phase 1 is complete. Phase 2 managed SDKs and runtimes are implemented; the
 package-manager adapter remains. Phase 3 project discovery is implemented;
-MSBuild evaluation, builds, and execution remain planned. Commands that do not
-work are not registered, and unimplemented screens state that they are
-placeholders.
+MSBuild evaluation, builds, and execution remain planned. Hilt now uses a
+single `~/hilt` home, configurable with `HILT_HOME`, with projects under
+`apps/` and internals under `.hilt/`. Commands that do not work are not
+registered, and unimplemented screens state that they are placeholders.
 
 ## Phase 2 — Managed SDKs (partially implemented)
 
@@ -14,7 +15,7 @@ Implemented:
 - Direct `.tar.gz` downloads for the host RID, restricted to Microsoft HTTPS
   hosts, with size limits and SHA-512 verification.
 - Exact stable version resolution and per-version, user-owned installation
-  directories under `<data>/hilt/dotnet`.
+  directories under `<HILT_HOME>/.hilt/data/dotnet`.
 - Staged installation verified through the installed `dotnet --list-sdks` and
   `dotnet --info` with an explicit environment.
 - Atomic publish, idempotent installs, install locking, and cleanup on failure.
@@ -50,6 +51,8 @@ Implemented:
 - `hilt projects list` and `hilt projects inspect` with human and JSON output.
 - TUI Projects & Solutions screen with background scanning, cancellation, and
   selection preserved across refreshes.
+- Single Hilt home layout with `apps/` and `.hilt/`, plus an atomic,
+  versioned state store for active and recent projects.
 
 Remaining:
 
