@@ -230,6 +230,22 @@ func printRuntimeInstallResult(writer io.Writer, result install.RuntimeResult) {
 	fmt.Fprintf(writer, "  Verified with %s --list-runtimes\n", result.VerifiedWith)
 }
 
+func printSDKUpdateResult(writer io.Writer, result install.UpdateResult) {
+	if !result.UpdateAvailable {
+		fmt.Fprintf(writer, "SDK %s is already up to date (%s)\n", result.From, result.To)
+		return
+	}
+	if result.Installed {
+		fmt.Fprintf(writer, "Updated .NET SDK %s -> %s\n", result.From, result.To)
+	}
+	if result.Removal != nil {
+		fmt.Fprintf(writer, "  Removed previous SDK %s\n", result.From)
+	}
+	if result.OldRetained {
+		fmt.Fprintf(writer, "  Previous SDK %s retained\n", result.From)
+	}
+}
+
 func printRuntimeUpdates(writer io.Writer, updates []install.Update) {
 	if len(updates) == 0 {
 		fmt.Fprintln(writer, "No managed .NET runtimes installed.")

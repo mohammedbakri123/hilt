@@ -31,6 +31,8 @@ type fakeBackend struct {
 	removeErr         error
 	updates           []install.Update
 	updatesErr        error
+	updateResult      install.UpdateResult
+	updateErr         error
 	runtimePlan       install.RuntimePlan
 	runtimePlanErr    error
 	runtimeResult     install.RuntimeResult
@@ -69,6 +71,12 @@ func (f fakeBackend) RemoveSDK(context.Context, string) (install.Removal, error)
 }
 func (f fakeBackend) CheckSDKUpdates(context.Context) ([]install.Update, error) {
 	return f.updates, f.updatesErr
+}
+func (f fakeBackend) UpdateSDK(_ context.Context, _ string, _ bool, progress io.Writer) (install.UpdateResult, error) {
+	if progress != nil {
+		_, _ = fmt.Fprintln(progress, "Downloading test archive")
+	}
+	return f.updateResult, f.updateErr
 }
 func (f fakeBackend) PlanRuntimeInstall(_ context.Context, _ string, framework install.FrameworkFlavor, _ bool) (install.RuntimePlan, error) {
 	if f.runtimePlan.Framework == "" {
@@ -1111,5 +1119,108 @@ func TestAliasWithPrereleaseFlagIsRejected(t *testing.T) {
 	lts := run(t, []string{"runtime", "install", "lts", "--prerelease"}, populatedBackend(), false, nil)
 	if lts.code != 2 || !strings.Contains(lts.stderr, "not supported with the lts alias") {
 		t.Errorf("result = %d %q", lts.code, lts.stderr)
+	}
+}
+
+func TestSDKUpdateHuman(t *testing.T) {
+	backend := populatedBackend()
+	backend.updateResult = install.UpdateResult{
+		From:            "10.0.100",
+		To:              "10.0.102",
+		UpdateAvailable: true,
+		Installed:       true,
+		Result:          install.Result{Version: "10.0.102", Root: "/managed/10.0.102"},
+		OldRetained:     true,
+	}
+	result := run(t, []string{"sdk", "update", "10.0.100"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{"Updated .NET SDK", "10.0.100", "10.0.102", "Previous SDK", "retained"} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestSDKUpdateRemoveOld(t *testing.T) {
+	backend := populatedBackend()
+	backend.updateResult = install.UpdateResult{
+		From:            "10.0.100",
+		To:              "10.0.102",
+		UpdateAvailable: true,
+		Installed:       true,
+		Result:          install.Result{Version: "10.0.102", Root: "/managed/10.0.102"},
+		Removal:         &install.Removal{Version: "10.0.100", Root: "/managed/10.0.100"},
+		OldRetained:     false,
+	}
+	result := run(t, []string{"sdk", "update", "10.0.100", "--remove-old"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	if !strings.Contains(result.stdout, "Removed previous SDK") {
+		t.Errorf("output missing removal:\n%s", result.stdout)
+	}
+}
+
+func TestSDKUpdateAlreadyCurrent(t *testing.T) {
+	backend := populatedBackend()
+	backend.updateResult = install.UpdateResult{
+		From:            "10.0.100",
+		To:              "10.0.100",
+		UpdateAvailable: false,
+		OldRetained:     true,
+	}
+	result := run(t, []string{"sdk", "update", "10.0.100"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	if !strings.Contains(result.stdout, "already up to date") {
+		t.Errorf("output = %q", result.stdout)
+	}
+}
+
+func TestSDKUpdatePartialRemovalFailure(t *testing.T) {
+	backend := populatedBackend()
+	backend.updateResult = install.UpdateResult{
+		From:            "10.0.100",
+		To:              "10.0.102",
+		UpdateAvailable: true,
+		Installed:       true,
+		Result:          install.Result{Version: "10.0.102", Root: "/managed/10.0.102"},
+		OldRetained:     true,
+	}
+	backend.updateErr = errors.New("remove old SDK failed")
+	result := run(t, []string{"sdk", "update", "10.0.100", "--remove-old"}, backend, false, nil)
+	if result.code != 1 || !strings.Contains(result.stderr, "remove old SDK failed") {
+		t.Errorf("result = %d %q", result.code, result.stderr)
+	}
+}
+
+func TestSDKUpdateJSON(t *testing.T) {
+	backend := populatedBackend()
+	backend.updateResult = install.UpdateResult{
+		From:            "10.0.100",
+		To:              "10.0.102",
+		UpdateAvailable: true,
+		Installed:       true,
+		Result:          install.Result{Version: "10.0.102", Root: "/managed/10.0.102"},
+		OldRetained:     true,
+	}
+	result := run(t, []string{"sdk", "update", "10.0.100", "--json"}, backend, false, nil)
+	if result.code != 0 {
+		t.Fatalf("exit = %d, want 0 (%s)", result.code, result.stderr)
+	}
+	for _, want := range []string{`"from": "10.0.100"`, `"to": "10.0.102"`, `"oldRetained": true`} {
+		if !strings.Contains(result.stdout, want) {
+			t.Errorf("output missing %q:\n%s", want, result.stdout)
+		}
+	}
+}
+
+func TestSDKUpdateErrors(t *testing.T) {
+	invalid := run(t, []string{"sdk", "update", "latest"}, populatedBackend(), false, nil)
+	if invalid.code != 2 || !strings.Contains(invalid.stderr, "invalid SDK version") {
+		t.Errorf("invalid version = %d %q", invalid.code, invalid.stderr)
 	}
 }

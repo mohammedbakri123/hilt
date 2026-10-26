@@ -31,6 +31,7 @@ type Backend interface {
 	InstallSDK(ctx context.Context, plan install.Plan, progress io.Writer) (install.Result, error)
 	RemoveSDK(ctx context.Context, version string) (install.Removal, error)
 	CheckSDKUpdates(ctx context.Context) ([]install.Update, error)
+	UpdateSDK(ctx context.Context, version string, removeOld bool, progress io.Writer) (install.UpdateResult, error)
 	PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor, allowPrerelease bool) (install.RuntimePlan, error)
 	InstallRuntime(ctx context.Context, plan install.RuntimePlan, progress io.Writer) (install.RuntimeResult, error)
 	RemoveRuntime(ctx context.Context, version string) (install.Removal, error)
@@ -270,6 +271,7 @@ func newSDKCommand(options Options) *cobra.Command {
 	command.AddCommand(newSDKInstallCommand(options))
 	command.AddCommand(newSDKRemoveCommand(options))
 	command.AddCommand(newSDKOutdatedCommand(options))
+	command.AddCommand(newSDKUpdateCommand(options))
 	return command
 }
 
@@ -534,6 +536,50 @@ func newRuntimeOutdatedCommand(options Options) *cobra.Command {
 		},
 	}
 	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
+	return command
+}
+
+func newSDKUpdateCommand(options Options) *cobra.Command {
+	var asJSON bool
+	var removeOld bool
+	command := &cobra.Command{
+		Use:   "update <version>",
+		Short: "Update a managed .NET SDK to the newest stable release",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.Context().Err(); err != nil {
+				return &exitError{code: 130, err: err}
+			}
+			if _, err := install.ValidateVersion(args[0]); err != nil {
+				return usageError(err.Error())
+			}
+			result, err := options.Backend.UpdateSDK(cmd.Context(), args[0], removeOld, cmd.OutOrStdout())
+			if err != nil {
+				if cmd.Context().Err() != nil {
+					return &exitError{code: 130, err: err}
+				}
+				if asJSON {
+					_ = writeJSON(options.Out, struct {
+						SchemaVersion int                  `json:"schemaVersion"`
+						Update        install.UpdateResult `json:"update"`
+					}{SchemaVersion: schemaVersion, Update: result})
+				} else {
+					printSDKUpdateResult(options.Out, result)
+				}
+				return failure(err)
+			}
+			if asJSON {
+				return writeJSON(options.Out, struct {
+					SchemaVersion int                  `json:"schemaVersion"`
+					Update        install.UpdateResult `json:"update"`
+				}{SchemaVersion: schemaVersion, Update: result})
+			}
+			printSDKUpdateResult(options.Out, result)
+			return nil
+		},
+	}
+	command.Flags().BoolVar(&asJSON, "json", false, "write machine-readable JSON")
+	command.Flags().BoolVar(&removeOld, "remove-old", false, "remove the previous SDK after a successful update")
 	return command
 }
 
