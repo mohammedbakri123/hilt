@@ -258,73 +258,144 @@ func (m Model) dashboardLines(width int) []string {
 		return append(lines, "No backend configured.")
 	}
 	info := m.backend.Platform()
-	lines = append(lines,
-		kv("Hilt version", m.backend.Version()),
-		kv("Platform", info.PlatformLabel()),
-		kv("Distribution", info.DisplayName()),
-	)
 
+	system := []string{
+		kvSized("Hilt version", m.backend.Version(), 14),
+		kvSized("Platform", info.PlatformLabel(), 14),
+		kvSized("Distribution", info.DisplayName(), 14),
+	}
 	if manager := m.backend.PackageManager(); manager != nil {
-		lines = append(lines, kv("Package manager", manager.Name))
+		system = append(system, kvSized("Package manager", manager.Name, 14))
 	} else {
-		lines = append(lines, kv("Package manager", "not detected"))
+		system = append(system, kvSized("Package manager", styleMuted.Render("not detected"), 14))
 	}
-
 	if path, ok := m.backend.Tool("git"); ok {
-		lines = append(lines, kv("Git", path))
+		system = append(system, kvSized("Git", path, 14))
 	} else {
-		lines = append(lines, kv("Git", styleWarning.Render("not found")))
+		system = append(system, kvSized("Git", styleWarning.Render("not found"), 14))
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, styleLabel.Render("DOTNET"))
+	toolchain := []string{}
 	switch {
 	case m.loadingInventory && m.inventory == nil:
-		lines = append(lines, m.spinner.View()+" scanning installations...")
-		return lines
+		toolchain = append(toolchain, m.spinner.View()+" scanning installations...")
 	case m.inventoryErr != nil:
-		lines = append(lines, styleError.Render("Inventory failed: "+m.inventoryErr.Error()))
-		return lines
+		toolchain = append(toolchain, styleError.Render("Inventory failed: "+m.inventoryErr.Error()))
 	case m.inventory == nil:
-		lines = append(lines, "Inventory not loaded.")
-		return lines
-	}
-
-	inventory := m.inventory
-	if inventory.HasUsableHost() || len(inventory.SDKs) > 0 {
-		lines = append(lines, kv(".NET installed", styleOK.Render("yes")))
-	} else {
-		lines = append(lines, kv(".NET installed", styleWarning.Render("not detected")))
-	}
-	lines = append(lines,
-		kv("SDKs", fmt.Sprintf("%d (%s)", len(inventory.SDKs), joinOr(inventory.SDKVersions(), "-"))),
-		kv("Runtimes", fmt.Sprintf("%d", len(inventory.Runtimes))),
-		kv("Installation roots", fmt.Sprintf("%d", len(inventory.Hosts))),
-		kv("Resolved dotnet", valueOr(inventory.ResolvedDotnet(), "not found")),
-		kv("Managed root", m.backend.Config().ManagedRoot),
-	)
-	if m.selection != nil {
-		lines = append(lines,
-			kv("Selected SDK", fmt.Sprintf("%s (%s)", m.selection.SDKVersion, m.selection.EffectiveProvenance())),
-			kv("Selected root", m.selection.Root),
+		toolchain = append(toolchain, "Inventory not loaded.")
+	default:
+		inventory := m.inventory
+		if inventory.HasUsableHost() || len(inventory.SDKs) > 0 {
+			toolchain = append(toolchain, kvSized(".NET installed", styleOK.Render("yes"), 14))
+		} else {
+			toolchain = append(toolchain, kvSized(".NET installed", styleWarning.Render("not detected"), 14))
+		}
+		toolchain = append(toolchain,
+			kvSized("SDKs", fmt.Sprintf("%d  %s", len(inventory.SDKs), styleMuted.Render("("+joinOr(inventory.SDKVersions(), "none")+")")), 14),
+			kvSized("Runtimes", fmt.Sprintf("%d  %s", len(inventory.Runtimes), styleMuted.Render(fmt.Sprintf("(%d root)", len(inventory.Hosts)))), 14),
+			kvSized("Resolved dotnet", valueOr(inventory.ResolvedDotnet(), "not found"), 14),
+			kvSized("Managed root", m.backend.Config().ManagedRoot, 14),
 		)
-	} else if m.selectionErr != nil {
-		lines = append(lines, kv("Selected SDK", styleWarning.Render("unavailable")))
+		if m.selection != nil {
+			toolchain = append(toolchain,
+				kvSized("Selected SDK", fmt.Sprintf("%s  %s", styleValue.Render(m.selection.SDKVersion), styleMuted.Render("("+string(m.selection.EffectiveProvenance())+")")), 14),
+			)
+		} else if m.selectionErr != nil {
+			toolchain = append(toolchain, kvSized("Selected SDK", styleWarning.Render("unavailable"), 14))
+		}
 	}
 
-	if !inventory.HasUsableHost() && len(inventory.SDKs) == 0 {
-		lines = append(lines, "", styleWarning.Render(
-			"No .NET SDK detected. Hilt remains fully usable; press i or run hilt sdk install."))
+	lines = append(lines, renderPanels([]panelSpec{
+		{title: "SYSTEM", content: system},
+		{title: ".NET TOOLCHAIN", content: toolchain},
+	}, width)...)
+
+	if m.inventory != nil && !m.inventory.HasUsableHost() && len(m.inventory.SDKs) == 0 {
+		lines = append(lines, "")
+		lines = append(lines, styledWrapped("No .NET SDK detected. Hilt remains fully usable; press i or run hilt sdk install.", width, styleWarning)...)
 	}
 
 	warnings := m.warnings()
 	if len(warnings) > 0 {
-		lines = append(lines, "", styleLabel.Render("WARNINGS"))
+		lines = append(lines, "")
+		content := make([]string, 0, len(warnings))
 		for _, warning := range warnings {
-			lines = append(lines, wrap(warning, width-2)...)
+			for index, line := range wrap(warning, width-6) {
+				if index == 0 {
+					line = "! " + line
+				} else {
+					line = "  " + line
+				}
+				content = append(content, styleWarning.Render(line))
+			}
 		}
+		lines = append(lines, panelBox("WARNINGS", content, width)...)
 	}
 	return lines
+}
+
+type panelSpec struct {
+	title   string
+	content []string
+}
+
+func renderPanels(specs []panelSpec, width int) []string {
+	if len(specs) == 0 {
+		return nil
+	}
+	if len(specs) == 2 && width >= 84 {
+		gap := 1
+		panelWidth := (width - gap) / 2
+		height := 0
+		for _, spec := range specs {
+			if len(spec.content) > height {
+				height = len(spec.content)
+			}
+		}
+		panels := make([][]string, len(specs))
+		for index, spec := range specs {
+			content := append([]string(nil), spec.content...)
+			for len(content) < height {
+				content = append(content, "")
+			}
+			panels[index] = panelBox(spec.title, content, panelWidth)
+		}
+		lines := make([]string, 0, len(panels[0]))
+		for index := range panels[0] {
+			line := panels[0][index] + strings.Repeat(" ", gap) + panels[1][index]
+			lines = append(lines, line)
+		}
+		return lines
+	}
+	var lines []string
+	for index, spec := range specs {
+		if index > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, panelBox(spec.title, spec.content, width)...)
+	}
+	return lines
+}
+
+func styledWrapped(text string, width int, style lipgloss.Style) []string {
+	lines := make([]string, 0, 1)
+	for _, line := range wrap(text, width) {
+		lines = append(lines, style.Render(line))
+	}
+	return lines
+}
+
+func panelBox(title string, content []string, width int) []string {
+	inner := width - 4
+	if inner < 8 {
+		inner = 8
+	}
+	body := []string{styleLabel.Render(title)}
+	for _, line := range content {
+		body = append(body, fitLine(line, inner))
+	}
+	box := stylePanel.Width(width).Render(strings.Join(body, "\n"))
+	return strings.Split(box, "\n")
 }
 
 func (m Model) sdkLines(width int) []string {
@@ -616,8 +687,11 @@ func sectionHeader(title string, width int) []string {
 }
 
 func kv(label, value string) string {
-	width := 22
-	padding := width - len(label)
+	return kvSized(label, value, 22)
+}
+
+func kvSized(label, value string, labelWidth int) string {
+	padding := labelWidth - lipgloss.Width(label)
 	if padding < 1 {
 		padding = 1
 	}

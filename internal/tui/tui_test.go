@@ -390,7 +390,7 @@ func TestViewFitsLayouts(t *testing.T) {
 func TestDashboardShowsInventory(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
 	view := model.View().Content
-	for _, want := range []string{"Dashboard", "10.0.112", "9.0.300", "CachyOS", "pacman", "/usr/share/dotnet/dotnet", "Selected SDK", "system"} {
+	for _, want := range []string{"Dashboard", "SYSTEM", ".NET TOOLCHAIN", "10.0.112", "9.0.300", "CachyOS", "pacman", "/usr/share/dotnet/dotnet", "Selected SDK", "system"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
