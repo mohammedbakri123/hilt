@@ -8,12 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/execution"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 	"github.com/mohammedbakri123/hilt/internal/process"
@@ -132,6 +134,10 @@ func (a *App) State() state.State {
 	current := a.state
 	current.RecentProjects = append([]state.RecentProject(nil), current.RecentProjects...)
 	current.PinnedExternalProjects = append([]string(nil), current.PinnedExternalProjects...)
+	if current.LastBuild != nil {
+		lastBuild := *current.LastBuild
+		current.LastBuild = &lastBuild
+	}
 	return current
 }
 
@@ -164,6 +170,51 @@ func (a *App) RecordProjectOpen(projectPath, workspacePath string) error {
 	}
 	a.state = current
 	return nil
+}
+
+// RecordBuildTarget remembers the most recent project Hilt built. Callers must
+// only record a target after the build command was actually started.
+func (a *App) RecordBuildTarget(target state.BuildTarget) error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+
+	current := a.state
+	current.SchemaVersion = state.CurrentSchemaVersion
+	if target.LastBuilt.IsZero() {
+		target.LastBuilt = time.Now().UTC()
+	}
+	current.LastBuild = &target
+	if current.PinnedExternalProjects == nil {
+		current.PinnedExternalProjects = []string{}
+	}
+	if err := a.stateStore.Save(current); err != nil {
+		return fmt.Errorf("save build state: %w", err)
+	}
+	a.state = current
+	return nil
+}
+
+// BuildProject runs dotnet build for one project. When no dotnet path is
+// supplied it resolves and verifies the toolchain for the current workspace.
+func (a *App) BuildProject(ctx context.Context, request execution.BuildRequest, stdout, stderr io.Writer) (execution.Result, error) {
+	if strings.TrimSpace(request.DotnetPath) == "" {
+		inventory, err := a.Inventory(ctx)
+		if err != nil {
+			return execution.Result{}, fmt.Errorf("discover .NET: %w", err)
+		}
+		selection, err := a.Resolve(ctx, inventory)
+		if err != nil {
+			return execution.Result{}, err
+		}
+		if strings.TrimSpace(selection.DotnetPath) == "" {
+			return execution.Result{}, fmt.Errorf("no usable .NET host was found")
+		}
+		request.DotnetPath = selection.DotnetPath
+		if request.Environment == nil {
+			request.Environment = selection.Environment(nil)
+		}
+	}
+	return execution.Builder{Runner: a.runner}.Build(ctx, request, stdout, stderr)
 }
 
 // PackageManager returns the detected package manager, if any.

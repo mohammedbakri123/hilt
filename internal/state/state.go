@@ -20,6 +20,15 @@ type RecentProject struct {
 	LastOpened time.Time `json:"lastOpened"`
 }
 
+// BuildTarget records the most recent project Hilt actually built.
+type BuildTarget struct {
+	ProjectPath   string    `json:"projectPath"`
+	WorkspacePath string    `json:"workspacePath,omitempty"`
+	SDKVersion    string    `json:"sdkVersion,omitempty"`
+	Configuration string    `json:"configuration,omitempty"`
+	LastBuilt     time.Time `json:"lastBuilt"`
+}
+
 // State is Hilt's versioned, user-local session state.
 type State struct {
 	SchemaVersion          int             `json:"schemaVersion"`
@@ -27,6 +36,7 @@ type State struct {
 	ActiveProject          string          `json:"activeProject,omitempty"`
 	RecentProjects         []RecentProject `json:"recentProjects"`
 	PinnedExternalProjects []string        `json:"pinnedExternalProjects"`
+	LastBuild              *BuildTarget    `json:"lastBuild,omitempty"`
 }
 
 // Defaults returns empty state for the current schema.

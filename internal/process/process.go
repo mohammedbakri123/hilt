@@ -27,6 +27,7 @@ type Result struct {
 	Stdout   []byte
 	Stderr   []byte
 	Duration time.Duration
+	Started  bool
 }
 
 // ExitError reports a non-zero process exit.
@@ -94,6 +95,7 @@ func run(ctx context.Context, spec Spec, stdout, stderr io.Writer) (Result, erro
 		result.Duration = time.Since(started)
 		return result, fmt.Errorf("start %s: %w", spec.Name, err)
 	}
+	result.Started = true
 
 	err := cmd.Wait()
 	result.Duration = time.Since(started)
