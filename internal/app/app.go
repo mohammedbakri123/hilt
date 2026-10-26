@@ -53,6 +53,10 @@ func New(version string) *App {
 	if cfg.ManagedRoot == "" {
 		cfg.ManagedRoot = paths.ManagedRoot
 	}
+	if cfg.DefaultProjectDir == "" {
+		cfg.DefaultProjectDir = paths.ProjectsRoot
+	}
+	warnings = append(warnings, legacyDataWarnings(paths, os.Getenv, home)...)
 
 	lookPath := exec.LookPath
 	cwd, _ := os.Getwd()
@@ -93,7 +97,7 @@ func (a *App) Version() string { return a.version }
 // Platform returns detected host information.
 func (a *App) Platform() platform.Info { return a.platform }
 
-// Paths returns resolved XDG directories.
+// Paths returns the resolved Hilt home layout.
 func (a *App) Paths() platform.Paths { return a.paths }
 
 // Config returns the loaded configuration.
@@ -182,10 +186,14 @@ func (a *App) AvailableSDKs(ctx context.Context, allowPrerelease bool) ([]instal
 }
 
 // ScanProjects discovers projects and solutions from root. An empty root uses
-// the configured default project directory, then the current directory.
+// the configured default project directory, then the Hilt projects root. The
+// current directory is only used when no other root is available.
 func (a *App) ScanProjects(ctx context.Context, root string, includeHidden bool) (projects.Result, error) {
 	if root == "" {
 		root = a.config.DefaultProjectDir
+	}
+	if root == "" {
+		root = a.paths.ProjectsRoot
 	}
 	if root == "" {
 		root = a.cwd
@@ -366,4 +374,26 @@ func (a *App) Diagnose(ctx context.Context) diagnostics.Report {
 		Cwd:            a.cwd,
 		PackageManager: a.packageManager,
 	})
+}
+
+func legacyDataWarnings(paths platform.Paths, getenv func(string) string, home string) []string {
+	legacyRoot := legacyXDGDir(getenv("XDG_DATA_HOME"), home, ".local/share")
+	legacyManifest := filepath.Join(legacyRoot, "hilt", "installs.json")
+	if _, err := os.Stat(legacyManifest); err != nil {
+		return nil
+	}
+	if _, err := os.Stat(paths.InstallManifestFile()); err == nil {
+		return nil
+	}
+	return []string{
+		"legacy managed installs were found at " + filepath.Dir(legacyManifest) +
+			"; Hilt now uses " + paths.DataDir + " and does not migrate them automatically",
+	}
+}
+
+func legacyXDGDir(value, home, fallback string) string {
+	if filepath.IsAbs(value) {
+		return filepath.Clean(value)
+	}
+	return filepath.Join(home, filepath.FromSlash(fallback))
 }

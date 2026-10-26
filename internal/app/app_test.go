@@ -290,10 +290,11 @@ func TestRemoveSDKNotInstalled(t *testing.T) {
 
 func TestScanProjectsUsesRootAndConfiguration(t *testing.T) {
 	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
 	t.Setenv("HOME", home)
-	t.Setenv("HILT_HOME", filepath.Join(home, "hilt"))
+	t.Setenv("HILT_HOME", hiltHome)
 
-	projectDir := filepath.Join(home, "work")
+	projectDir := filepath.Join(hiltHome, "apps", "Shop")
 	if err := os.MkdirAll(projectDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -301,14 +302,25 @@ func TestScanProjectsUsesRootAndConfiguration(t *testing.T) {
 	if err := os.WriteFile(projectPath, []byte(`<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	externalDir := filepath.Join(home, "work")
+	if err := os.MkdirAll(externalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	externalPath := filepath.Join(externalDir, "External.csproj")
+	if err := os.WriteFile(externalPath, []byte(`<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	application := New("test")
-	result, err := application.ScanProjects(context.Background(), projectDir, false)
+	if application.Config().DefaultProjectDir != application.Paths().ProjectsRoot {
+		t.Errorf("DefaultProjectDir = %q, want %q", application.Config().DefaultProjectDir, application.Paths().ProjectsRoot)
+	}
+	result, err := application.ScanProjects(context.Background(), externalDir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Projects) != 1 || result.Projects[0].Path != projectPath {
-		t.Fatalf("projects = %+v", result.Projects)
+	if len(result.Projects) != 1 || result.Projects[0].Path != externalPath {
+		t.Fatalf("external projects = %+v", result.Projects)
 	}
 
 	inspection, err := application.InspectProject(context.Background(), projectPath)
@@ -319,13 +331,41 @@ func TestScanProjectsUsesRootAndConfiguration(t *testing.T) {
 		t.Errorf("inspection = %+v", inspection)
 	}
 
-	t.Chdir(projectDir)
+	t.Chdir(externalDir)
 	application = New("test")
 	result, err = application.ScanProjects(context.Background(), "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Projects) != 1 || result.Projects[0].Path != projectPath {
-		t.Errorf("current-directory scan = %+v", result.Projects)
+		t.Errorf("default scan = %+v, want project under HILT_HOME/apps", result.Projects)
+	}
+}
+
+func TestNewWarnsAboutLegacyManagedInstalls(t *testing.T) {
+	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
+	legacyData := filepath.Join(home, "legacy-data")
+	legacyDir := filepath.Join(legacyData, "hilt")
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "installs.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", hiltHome)
+	t.Setenv("XDG_DATA_HOME", legacyData)
+
+	application := New("test")
+	found := false
+	for _, warning := range application.ConfigWarnings() {
+		if strings.Contains(warning, "legacy managed installs") && strings.Contains(warning, legacyDir) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected legacy install warning: %v", application.ConfigWarnings())
 	}
 }
