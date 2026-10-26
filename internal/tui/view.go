@@ -70,13 +70,65 @@ func (m Model) render(width, height int) string {
 	}
 	main := strings.Join(prefixed, "\n")
 
+	var content string
 	if !m.showSidebar() {
-		return lipgloss.JoinVertical(lipgloss.Left, header, main, status, footer)
+		content = lipgloss.JoinVertical(lipgloss.Left, header, main, status, footer)
+	} else {
+		sidebar := m.renderSidebar(bodyHeight)
+		body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
+		content = lipgloss.JoinVertical(lipgloss.Left, header, body, status, footer)
 	}
+	if m.quitConfirm {
+		content = overlayCentered(content, m.renderQuitDialog(width), width, height)
+	}
+	return content
+}
 
-	sidebar := m.renderSidebar(bodyHeight)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, status, footer)
+func (m Model) renderQuitDialog(width int) string {
+	boxWidth := 56
+	if boxWidth > width-4 {
+		boxWidth = width - 4
+	}
+	if boxWidth < 12 {
+		boxWidth = 12
+	}
+	content := []string{
+		"An operation is still running:",
+		styleValue.Render(m.busyLabel()),
+		"",
+		"Quitting interrupts it. Press esc to stay, or cancel the operation first with esc.",
+		"",
+		styleKey.Render("y / enter") + "  quit anyway",
+		styleKey.Render("esc / n") + "     stay",
+	}
+	return styleCallout.Width(boxWidth).Render(strings.Join(content, "\n"))
+}
+
+func overlayCentered(base, box string, width, height int) string {
+	baseLines := strings.Split(base, "\n")
+	boxLines := strings.Split(box, "\n")
+	left := (width - lipgloss.Width(box)) / 2
+	if left < 0 {
+		left = 0
+	}
+	top := (height - len(boxLines)) / 2
+	if top < 0 {
+		top = 0
+	}
+	for index, line := range boxLines {
+		target := top + index
+		if target >= len(baseLines) {
+			break
+		}
+		baseLines[target] = overlayLine(baseLines[target], line, left)
+	}
+	return strings.Join(baseLines, "\n")
+}
+
+func overlayLine(base, overlay string, left int) string {
+	before := ansi.Truncate(base, left, "")
+	after := ansi.TruncateLeft(base, left+lipgloss.Width(overlay), "")
+	return before + overlay + after
 }
 
 func (m Model) renderStatusLine(width int) string {
@@ -167,12 +219,14 @@ type keyHint struct {
 func (m Model) renderFooter(width int) string {
 	var hints []keyHint
 	switch {
+	case m.quitConfirm:
+		hints = []keyHint{{"y/enter", "quit"}, {"esc/n", "stay"}}
 	case m.showHelp:
 		hints = []keyHint{{"esc", "close help"}, {"q", "quit"}}
 	case m.operationRunning:
-		hints = []keyHint{{"esc", "cancel operation"}}
+		hints = []keyHint{{"esc", "cancel operation"}, {"q", "quit"}}
 	case m.loadingUpdates:
-		hints = []keyHint{{"esc", "cancel update check"}}
+		hints = []keyHint{{"esc", "cancel update check"}, {"q", "quit"}}
 	case m.prompt == promptInstallSDK:
 		if m.promptFocusInput {
 			hints = []keyHint{{"tab", "select"}, {"enter", "install"}, {"esc", "cancel"}}

@@ -123,7 +123,8 @@ type Model struct {
 	sdkScroll  int
 	diagScroll int
 
-	showHelp bool
+	showHelp    bool
+	quitConfirm bool
 
 	sdkFocus      focusArea
 	sdkCursor     int
@@ -437,17 +438,15 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.operationRunning {
-		switch key {
-		case "esc", "ctrl+c", "q":
-			m.cancelOperation()
-		}
-		return m, nil
+	if m.quitConfirm {
+		return m.handleQuitConfirmKey(message)
 	}
 
-	if m.loadingUpdates {
+	if m.busy() {
 		switch key {
-		case "esc", "ctrl+c", "q":
+		case "q":
+			m.quitConfirm = true
+		case "esc", "ctrl+c":
 			m.cancelOperation()
 		}
 		return m, nil
@@ -574,6 +573,34 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	return m, nil
+}
+
+func (m Model) busy() bool {
+	return m.operationRunning || m.loadingUpdates
+}
+
+func (m Model) busyLabel() string {
+	if m.operationRunning {
+		if m.operationLabel != "" {
+			return m.operationLabel
+		}
+		return "An operation is running"
+	}
+	if m.loadingUpdates {
+		return "Checking for managed updates"
+	}
+	return ""
+}
+
+func (m Model) handleQuitConfirmKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "y", "enter":
+		return m, tea.Quit
+	case "esc", "n", "ctrl+c":
+		m.quitConfirm = false
+		return m, nil
+	}
 	return m, nil
 }
 

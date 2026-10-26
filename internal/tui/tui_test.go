@@ -1333,3 +1333,59 @@ func TestStatusLineAppearsOnEveryScreen(t *testing.T) {
 		})
 	}
 }
+
+func TestQuitDuringOperationRequiresConfirmation(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	model.startOperation("Installing managed SDK 9.0.300", func() {})
+
+	updated, command := model.Update(key('q', "q"))
+	model = updated.(Model)
+	if command != nil {
+		t.Fatal("q during an operation must not quit immediately")
+	}
+	if !model.quitConfirm {
+		t.Fatal("q during an operation should open a quit confirmation")
+	}
+	if !model.operationRunning || model.operationCancelling {
+		t.Fatalf("operation state changed: running=%v cancelling=%v", model.operationRunning, model.operationCancelling)
+	}
+	plain := ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "An operation is still running") || !strings.Contains(plain, "quit anyway") {
+		t.Fatalf("quit confirmation missing: %q", plain)
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.quitConfirm {
+		t.Fatal("esc should stay in the operation")
+	}
+	if !model.operationRunning || model.operationCancelling {
+		t.Fatalf("esc should not cancel from the quit dialog: running=%v cancelling=%v", model.operationRunning, model.operationCancelling)
+	}
+
+	model = press(t, model, key('q', "q"))
+	updated, command = model.Update(key('y', "y"))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("confirming quit should return a command")
+	}
+	if _, ok := command().(tea.QuitMsg); !ok {
+		t.Fatalf("quit command returned %T, want tea.QuitMsg", command())
+	}
+}
+
+func TestEscapeCancelsDuringOperation(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	cancelled := false
+	model.startOperation("Installing managed SDK 9.0.300", func() { cancelled = true })
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !cancelled {
+		t.Fatal("esc should cancel the running operation")
+	}
+	if !model.operationCancelling {
+		t.Fatal("operation should be marked as cancelling")
+	}
+	if model.quitConfirm {
+		t.Fatal("esc must not open the quit confirmation")
+	}
+}
