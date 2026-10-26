@@ -9,7 +9,10 @@ import (
 
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
+	"io"
+
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 )
 
@@ -25,6 +28,17 @@ type Backend interface {
 	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
 	Diagnose(ctx context.Context) diagnostics.Report
 	Tool(name string) (string, bool)
+
+	PlanSDKInstall(ctx context.Context, version string, allowPrerelease bool) (install.Plan, error)
+	InstallSDK(ctx context.Context, plan install.Plan, progress io.Writer) (install.Result, error)
+	RemoveSDK(ctx context.Context, version string) (install.Removal, error)
+	UpdateSDK(ctx context.Context, version string, removeOld bool, progress io.Writer) (install.UpdateResult, error)
+	CheckSDKUpdates(ctx context.Context) ([]install.Update, error)
+
+	PlanRuntimeInstall(ctx context.Context, version string, framework install.FrameworkFlavor, allowPrerelease bool) (install.RuntimePlan, error)
+	InstallRuntime(ctx context.Context, plan install.RuntimePlan, progress io.Writer) (install.RuntimeResult, error)
+	RemoveRuntime(ctx context.Context, version string) (install.Removal, error)
+	CheckRuntimeUpdates(ctx context.Context) ([]install.Update, error)
 }
 
 // Screen identifies a main section.

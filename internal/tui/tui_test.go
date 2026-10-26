@@ -11,7 +11,10 @@ import (
 
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
+	"io"
+
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/platform"
 )
 
@@ -49,6 +52,30 @@ func (f fakeBackend) Tool(name string) (string, bool) {
 	}
 	return "", false
 }
+
+func (f fakeBackend) PlanSDKInstall(context.Context, string, bool) (install.Plan, error) {
+	return install.Plan{}, nil
+}
+func (f fakeBackend) InstallSDK(_ context.Context, _ install.Plan, _ io.Writer) (install.Result, error) {
+	return install.Result{}, nil
+}
+func (f fakeBackend) RemoveSDK(context.Context, string) (install.Removal, error) {
+	return install.Removal{}, nil
+}
+func (f fakeBackend) UpdateSDK(_ context.Context, _ string, _ bool, _ io.Writer) (install.UpdateResult, error) {
+	return install.UpdateResult{}, nil
+}
+func (f fakeBackend) CheckSDKUpdates(context.Context) ([]install.Update, error) { return nil, nil }
+func (f fakeBackend) PlanRuntimeInstall(context.Context, string, install.FrameworkFlavor, bool) (install.RuntimePlan, error) {
+	return install.RuntimePlan{}, nil
+}
+func (f fakeBackend) InstallRuntime(_ context.Context, _ install.RuntimePlan, _ io.Writer) (install.RuntimeResult, error) {
+	return install.RuntimeResult{}, nil
+}
+func (f fakeBackend) RemoveRuntime(context.Context, string) (install.Removal, error) {
+	return install.Removal{}, nil
+}
+func (f fakeBackend) CheckRuntimeUpdates(context.Context) ([]install.Update, error) { return nil, nil }
 
 func newFakeBackend() fakeBackend {
 	return fakeBackend{
