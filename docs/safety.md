@@ -104,7 +104,7 @@ are read-only. Hilt walks the requested root with `filepath.WalkDir` and parses
   `node_modules`) are skipped at any depth. Hidden paths are skipped unless
   `--all` is requested.
 - Directory symlinks are not followed, which prevents symlink loops.
-- `PROJECT.ASSETS` and other build outputs are not read.
+- `project.assets.json` and other build outputs are not read.
 - Declared values are reported as written. Hilt does not evaluate MSBuild
   properties, conditions, imports, or `Directory.Build.props`.
 - Discovery never writes project files and never runs MSBuild, `dotnet build`,
