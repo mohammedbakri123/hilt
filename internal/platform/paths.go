@@ -1,6 +1,8 @@
 package platform
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 )
 
@@ -46,6 +48,32 @@ func NewPaths(getenv func(string) string, home string) Paths {
 		LogsDir:      filepath.Join(hilt, "logs"),
 		ManagedRoot:  filepath.Join(data, "dotnet"),
 	}
+}
+
+// EnsureLayout creates Hilt's user-owned directories with conservative
+// permissions. Existing directories are left untouched.
+func (p Paths) EnsureLayout() error {
+	directories := []struct {
+		path string
+		mode os.FileMode
+	}{
+		{p.HomeDir, 0o755},
+		{p.ProjectsRoot, 0o755},
+		{p.ConfigDir, 0o700},
+		{p.CacheDir, 0o700},
+		{p.DataDir, 0o700},
+		{p.LogsDir, 0o700},
+		{p.ManagedRoot, 0o700},
+	}
+	for _, directory := range directories {
+		if directory.path == "" {
+			continue
+		}
+		if err := os.MkdirAll(directory.path, directory.mode); err != nil {
+			return fmt.Errorf("create %s: %w", directory.path, err)
+		}
+	}
+	return nil
 }
 
 // ConfigFile is the main configuration path.

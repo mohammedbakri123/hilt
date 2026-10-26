@@ -175,6 +175,9 @@ absolute path to move it. Relative overrides are ignored.
 ```
 
 - `Paths.ProjectsRoot` and the default project scan root are `~/hilt/apps`.
+- Hilt creates the home, `apps/`, and internal directories at startup. The
+  configuration, state, and install manifest files are still created only when
+  they are written.
 - `HILT_HOME` applies to configuration, state, cache, data, logs, and the
   managed toolchain root. XDG variables no longer select these locations.
 - Projects outside `~/hilt/apps` remain valid. Hilt records their paths but

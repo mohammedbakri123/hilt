@@ -56,6 +56,9 @@ func New(version string) *App {
 	if cfg.DefaultProjectDir == "" {
 		cfg.DefaultProjectDir = paths.ProjectsRoot
 	}
+	if err := paths.EnsureLayout(); err != nil {
+		warnings = append(warnings, "create Hilt directories: "+err.Error())
+	}
 	warnings = append(warnings, legacyDataWarnings(paths, os.Getenv, home)...)
 
 	lookPath := exec.LookPath

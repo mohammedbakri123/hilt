@@ -181,3 +181,29 @@ type notFound struct{}
 func (notFound) Error() string { return "not found" }
 
 var errNotFound = notFound{}
+
+func TestPathsEnsureLayout(t *testing.T) {
+	root := t.TempDir()
+	paths := NewPaths(func(string) string { return root }, "/home/user")
+	if err := paths.EnsureLayout(); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{
+		paths.HomeDir,
+		paths.ProjectsRoot,
+		paths.ConfigDir,
+		paths.CacheDir,
+		paths.DataDir,
+		paths.LogsDir,
+		paths.ManagedRoot,
+	} {
+		info, err := os.Stat(directory)
+		if err != nil {
+			t.Errorf("%s: %v", directory, err)
+			continue
+		}
+		if !info.IsDir() {
+			t.Errorf("%s is not a directory", directory)
+		}
+	}
+}

@@ -133,9 +133,11 @@ live under `~/hilt/apps`; Hilt internals live under `~/hilt/.hilt`. Existing
 projects are never copied, moved, or rewritten. A project outside the Hilt home
 can be referenced by path and is never copied in.
 
-Configuration and state are written only when a save is requested. Saves are
-atomic and mode `0600`; malformed files are preserved with a `.corrupt-*`
-suffix. The install manifest is also written atomically with mode `0600`.
+Hilt creates the home, `apps/`, and internal directories at startup. The
+configuration, state, and install manifest files are written only when they are
+needed. Saves are atomic and mode `0600`; malformed files are preserved with a
+`.corrupt-*` suffix. The install manifest is also written atomically with mode
+`0600`.
 
 The old XDG configuration/data locations are no longer used. Hilt does not
 migrate or delete them. If a legacy XDG install manifest is found and the new

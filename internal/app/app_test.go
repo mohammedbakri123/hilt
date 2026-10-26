@@ -369,3 +369,38 @@ func TestNewWarnsAboutLegacyManagedInstalls(t *testing.T) {
 		t.Errorf("expected legacy install warning: %v", application.ConfigWarnings())
 	}
 }
+
+func TestNewCreatesHiltLayout(t *testing.T) {
+	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", hiltHome)
+
+	application := New("test")
+	for _, directory := range []string{
+		hiltHome,
+		filepath.Join(hiltHome, "apps"),
+		filepath.Join(hiltHome, ".hilt"),
+		filepath.Join(hiltHome, ".hilt", "cache"),
+		filepath.Join(hiltHome, ".hilt", "data"),
+		filepath.Join(hiltHome, ".hilt", "logs"),
+		filepath.Join(hiltHome, ".hilt", "data", "dotnet"),
+	} {
+		info, err := os.Stat(directory)
+		if err != nil {
+			t.Errorf("%s: %v", directory, err)
+			continue
+		}
+		if !info.IsDir() {
+			t.Errorf("%s is not a directory", directory)
+		}
+	}
+
+	result, err := application.ScanProjects(context.Background(), "", false)
+	if err != nil {
+		t.Fatalf("scan empty Hilt home: %v", err)
+	}
+	if len(result.Projects) != 0 {
+		t.Errorf("projects = %+v, want none", result.Projects)
+	}
+}

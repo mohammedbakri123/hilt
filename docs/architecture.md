@@ -59,10 +59,10 @@ cmd/hilt
 
 1. `main` creates a signal-aware context and constructs `app.New`.
 2. `app.New` detects the platform, resolves the Hilt home (`HILT_HOME` or
-   `~/hilt`), loads configuration, and wires the process runner, locator,
-   prober, package-manager lookup, and install manifest. The manifest supplies
-   ownership and managed roots to the locator. An empty
-   `defaultProjectDir` falls back to `<HILT_HOME>/apps`.
+   `~/hilt`), creates the user-owned directories, loads configuration, and
+   wires the process runner, locator, prober, package-manager lookup, and
+   install manifest. The manifest supplies ownership and managed roots to the
+   locator. An empty `defaultProjectDir` falls back to `<HILT_HOME>/apps`.
 3. The CLI either runs a non-interactive command or hands the backend to the
    TUI.
 4. Discovery runs in `tea.Cmd` / CLI command context, never in the TUI update
