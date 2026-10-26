@@ -3,3 +3,5 @@
 *.test
 coverage.out
 coverage.html
+**/obj/
+**/bin/
