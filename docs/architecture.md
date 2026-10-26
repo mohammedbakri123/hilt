@@ -17,6 +17,7 @@ internal/dotnet          discovery, probing, inventory, global.json, versions
 internal/install         release metadata, archives, manifest, install/remove
 internal/platform        OS/distro detection, XDG paths, package managers
 internal/process         external command execution with contexts and groups
+internal/projects        project/solution discovery and declared metadata
 ```
 
 ## Dependency direction
@@ -31,9 +32,10 @@ cmd/hilt
   │     ├── internal/install
   │     │     ├── internal/dotnet
   │     │     └── internal/process
-  │     └── internal/platform
-  ├── internal/cli ──► internal/{config,diagnostics,dotnet,install,platform}
-  └── internal/tui ──► internal/{config,diagnostics,dotnet,platform}
+  │     ├── internal/platform
+  │     └── internal/projects
+  ├── internal/cli ──► internal/{config,diagnostics,dotnet,install,platform,projects}
+  └── internal/tui ──► internal/{config,diagnostics,dotnet,platform,projects}
 ```
 
 - `internal/tui` and `internal/cli` define their own small `Backend`
@@ -43,6 +45,9 @@ cmd/hilt
 - `internal/install` owns all network, archive, manifest, and managed-root
   mutation logic. It depends on `internal/dotnet` for versions, RIDs, parsing,
   and the explicit toolchain environment.
+- `internal/projects` owns filesystem discovery and declared project metadata.
+  It parses `.csproj`, `.sln`, `.slnx`, and `.slnf` with standard-library
+  decoders and never invokes MSBuild or `dotnet`.
 - `internal/platform` and `internal/config` do not import higher-level packages.
 - No package imports `internal/app`, which prevents composition cycles.
 
@@ -59,7 +64,11 @@ cmd/hilt
    loop. Missing .NET is represented as an empty inventory plus warnings.
 5. Diagnostics reuses the inventory and adds configuration, `global.json`,
    package-manager, git, and managed-root findings.
-6. `hilt sdk available` reads the release index and channel metadata to list
+6. `hilt projects list` walks the requested root with `filepath.WalkDir`,
+   applies configured directory exclusions, and parses project/solution files
+   without MSBuild. The TUI Projects screen runs the same scan in a `tea.Cmd`
+   and preserves the selected project across refreshes.
+7. `hilt sdk available` reads the release index and channel metadata to list
    downloadable versions from 7.0 onward for the host RID, including
    maintenance and end-of-life channels. `hilt sdk install` resolves
    metadata, downloads and verifies an archive, stages and verifies the
@@ -82,6 +91,8 @@ cmd/hilt
 - Install and removal operations are serialized by `installs.lock`.
 - Network access is confined to `internal/install`; ordinary tests use local
   HTTP servers.
+- Project discovery is read-only and confined to the requested root (plus the
+  paths a workspace file declares). It never writes projects or invokes MSBuild.
 - JSON payloads carry `schemaVersion: 1`.
 
 ## Testing seams
@@ -89,6 +100,7 @@ cmd/hilt
 `Locator`, `Prober`, `process.Runner`, `LookPath`, `Stat`, environment lookup,
 clock-free parsers, `install.ReleaseClient`, `HTTPClient`, `ValidateURL`,
 `RemoveAll`, and `Now` are injectable. Unit tests use temporary directory trees,
-fake probers and runners, captured fixtures under `tests/testdata`, and local
-metadata/archive servers. A real .NET integration test is opt-in through
+fake probers and runners, captured fixtures under `tests/testdata`, project
+fixtures under `internal/projects/testdata`, and local metadata/archive
+servers. A real .NET integration test is opt-in through
 `HILT_TEST_REAL_DOTNET=1`.

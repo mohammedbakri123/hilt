@@ -94,6 +94,24 @@ in the same `major.minor` release channel as each manifest-owned installation.
 It reports availability; it never downloads, installs, or applies an update.
 Update checks require network access to Microsoft release metadata.
 
+## Project discovery
+
+`hilt projects list` and `hilt projects inspect`, plus the TUI Projects screen,
+are read-only. Hilt walks the requested root with `filepath.WalkDir` and parses
+`.csproj`, `.sln`, `.slnx`, and `.slnf` with standard-library decoders.
+
+- Directory names in `scanExclusions` (default `bin`, `obj`, `.git`,
+  `node_modules`) are skipped at any depth. Hidden paths are skipped unless
+  `--all` is requested.
+- Directory symlinks are not followed, which prevents symlink loops.
+- `PROJECT.ASSETS` and other build outputs are not read.
+- Declared values are reported as written. Hilt does not evaluate MSBuild
+  properties, conditions, imports, or `Directory.Build.props`.
+- Discovery never writes project files and never runs MSBuild, `dotnet build`,
+  `dotnet run`, or NuGet operations.
+- Unreadable directories and malformed project files are reported as warnings
+  or errors rather than aborting the whole scan.
+
 ## What Hilt does not do
 
 - It does not run `sudo`.
@@ -102,6 +120,7 @@ Update checks require network access to Microsoft release metadata.
 - It does not modify, upgrade, or remove system or external SDKs.
 - It does not update automatically.
 - It does not write project files, NuGet state, or templates yet.
+- It does not evaluate MSBuild, build, run, or test projects yet.
 
 System package-manager installation remains an explicit alternative, not the
 default. Offline operation reports what is unavailable instead of failing

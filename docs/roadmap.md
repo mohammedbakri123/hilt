@@ -1,9 +1,9 @@
 # Roadmap
 
-Phase 1 is complete. The managed-SDK portion of Phase 2 is implemented; the
-remaining Phase 2 items and later phases are planned, not implemented. Commands
-that do not work are not registered, and screens state that they are
-placeholders.
+Phase 1 is complete. Phase 2 managed SDKs and runtimes are feature-complete.
+Phase 3 project discovery is implemented; MSBuild evaluation, builds, and
+execution remain planned. Commands that do not work are not registered, and
+screens state that they are placeholders.
 
 ## Phase 2 — Managed SDKs (partially implemented)
 
@@ -40,8 +40,18 @@ Remaining:
 
 ## Phase 3 — Projects and execution
 
-- Solution and project scanning with exclusions and cancellation.
-- `.sln`, `.slnx`, `.slnf`, and `.csproj` metadata.
+Implemented:
+
+- Solution and project discovery with configured exclusions, hidden-path
+  handling, depth limits, symlink-loop guards, and cancellation.
+- `.sln`, `.slnx`, `.slnf`, and `.csproj` declared metadata: target frameworks,
+  SDK hint, output type, test-project hint, and project references.
+- `hilt projects list` and `hilt projects inspect` with human and JSON output.
+- TUI Projects & Solutions screen with background scanning, cancellation, and
+  selection preserved across refreshes.
+
+Remaining:
+
 - Evaluated properties through MSBuild when available; declared-only values
   labeled as such.
 - Build, clean, restore, run, stop, and test with streaming output.

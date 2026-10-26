@@ -6,7 +6,8 @@ standalone Go executable: it starts and reports useful information even when no
 
 ## Status
 
-Phase 1 and the managed SDK/runtime portions of Phase 2 are implemented.
+Phase 1, the managed SDK/runtime portions of Phase 2, and Phase 3 project
+discovery are implemented.
 
 Phase 1 provides:
 
@@ -40,9 +41,21 @@ Phase 2 managed SDKs provide:
 - Read-wide discovery with write-private mutations: system and external SDKs
   are never modified or removed, and Hilt never uses `sudo` or edits `PATH`.
 
-Not implemented: package-manager writes, project scanning, builds, NuGet
-operations, and templates. The corresponding screens say so explicitly. See
-[docs/roadmap.md](docs/roadmap.md).
+Phase 3 project discovery provides:
+
+- `hilt projects list [--path <dir>] [--all] [--json]` discovers `.sln`,
+  `.slnx`, `.slnf`, and `.csproj` files without invoking MSBuild.
+- `hilt projects inspect <path> [--json]` reports declared target frameworks,
+  SDK hints, output type, test-project hints, and project references.
+- Recursive scanning skips `bin`, `obj`, `.git`, and `node_modules` by default,
+  ignores hidden paths unless `--all` is passed, guards symlink loops, and
+  honors cancellation.
+- The TUI Projects & Solutions screen scans in the background, keeps the
+  selected project across refreshes, and shows declared metadata.
+
+Not implemented: MSBuild evaluation, builds, run/test execution, `global.json`
+writes, NuGet operations, and templates. The corresponding screens say so
+explicitly. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 
@@ -92,6 +105,11 @@ bin/hilt runtime install <version> --framework all
 bin/hilt runtime remove <version>
 bin/hilt runtime outdated
 bin/hilt runtime outdated --json
+bin/hilt projects list
+bin/hilt projects list --path ~/src --all
+bin/hilt projects list --json
+bin/hilt projects inspect path/to/App.csproj
+bin/hilt projects inspect path/to/Solution.sln --json
 bin/hilt version
 ```
 
@@ -114,6 +132,12 @@ picker, downloads show a progress bar.
 `hilt sdk outdated` checks the newest stable SDK in the same `major.minor`
 release channel as each managed installation. It reports results only; it does
 not download or update anything.
+
+`hilt projects list` scans the current directory, a `--path` directory, or a
+single project/solution file. Directory names matching the configured
+`scanExclusions` (default `bin`, `obj`, `.git`, `node_modules`) are skipped at
+any depth. `--all` also includes hidden files and directories. Declared values
+are shown as written; Hilt does not evaluate MSBuild conditions or properties.
 
 ## Exit codes
 
