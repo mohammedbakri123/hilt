@@ -725,6 +725,45 @@ func TestSDKInstallFlow(t *testing.T) {
 	}
 }
 
+func TestManagementPanelsAndStatusBadges(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	model = press(t, model, key('2', "2"))
+
+	prompt := model
+	prompt.startSDKPrompt()
+	plain := ansi.Strip(prompt.View().Content)
+	if !strings.Contains(plain, "INSTALL SDK") || !strings.Contains(plain, "version") {
+		t.Fatalf("install prompt panel missing: %q", plain)
+	}
+
+	confirm := model
+	confirm.confirm = confirmInstallSDK
+	confirm.confirmSummary = []string{"Install managed SDK 10.0.112?", "Only Hilt-managed files are changed."}
+	plain = ansi.Strip(confirm.View().Content)
+	if !strings.Contains(plain, "CONFIRM INSTALL SDK") || !strings.Contains(plain, "• Install managed SDK") {
+		t.Fatalf("confirmation panel missing: %q", plain)
+	}
+
+	operation := model
+	operation.operationRunning = true
+	operation.operationLabel = "Installing SDK 10.0.112..."
+	operation.progressLines = []string{"Downloading archive", "Verifying SHA-512"}
+	plain = ansi.Strip(operation.View().Content)
+	if !strings.Contains(plain, "IN PROGRESS") || !strings.Contains(plain, "Verifying SHA-512") {
+		t.Fatalf("operation panel missing: %q", plain)
+	}
+
+	status := model
+	status.setStatus("Installed managed SDK 10.0.112.", false)
+	if !strings.Contains(ansi.Strip(status.View().Content), "[ok] Installed managed SDK") {
+		t.Fatalf("success status missing: %q", status.View().Content)
+	}
+	status.setStatus("Install failed.", true)
+	if !strings.Contains(ansi.Strip(status.View().Content), "[err] Install failed") {
+		t.Fatalf("error status missing: %q", status.View().Content)
+	}
+}
+
 func TestRuntimeInstallPromptIncludesFramework(t *testing.T) {
 	backend := newFakeBackend()
 	model := loadedModel(t, backend, 120, 36)

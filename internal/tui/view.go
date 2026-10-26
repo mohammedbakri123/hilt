@@ -551,56 +551,107 @@ func (m Model) sdkLines(width int) []string {
 func (m Model) managementLines(width int) []string {
 	var lines []string
 	if m.prompt != promptNone {
-		label := "INSTALL SDK"
+		title := "INSTALL SDK"
 		if m.prompt == promptInstallRuntime {
-			label = "INSTALL RUNTIME"
+			title = "INSTALL RUNTIME"
 		}
-		lines = append(lines, "", styleAccent.Render(label))
-		lines = append(lines, "  version  "+m.promptInput+styleMuted.Render("_"))
+		input := m.promptInput
+		if input == "" {
+			input = styleFaint.Render("latest, lts, or exact version")
+		}
+		content := []string{
+			styleLabel.Render("version") + "  " + input + styleAccent.Render("▌"),
+		}
 		if m.prompt == promptInstallRuntime {
-			lines = append(lines, fmt.Sprintf("  framework %s  %s", m.promptFramework,
-				styleMuted.Render("(left/right to change)")))
+			content = append(content, styleMuted.Render("framework "+string(m.promptFramework))+"   "+styleFaint.Render("←/→ change"))
 		}
-		lines = append(lines, "  "+styleMuted.Render("enter to resolve · esc to cancel"))
+		lines = append(lines, "")
+		lines = append(lines, calloutBox(title, content, width)...)
 		return lines
 	}
 	if m.confirm != confirmNone {
-		lines = append(lines, "", styleAccent.Render("CONFIRM"))
+		content := make([]string, 0, len(m.confirmSummary)+1)
 		for _, summary := range m.confirmSummary {
-			lines = append(lines, "  "+summary)
+			for index, line := range wrap(summary, width-8) {
+				if index == 0 {
+					content = append(content, styleAccent.Render("• ")+line)
+				} else {
+					content = append(content, "  "+line)
+				}
+			}
 		}
-		lines = append(lines, "  "+styleMuted.Render("enter/y confirm · esc/n cancel"))
+		lines = append(lines, "")
+		lines = append(lines, calloutBox("CONFIRM "+confirmTitle(m.confirm), content, width)...)
 		return lines
 	}
 	if m.operationRunning {
-		lines = append(lines, "", m.spinner.View()+" "+m.operationLabel)
+		content := []string{m.spinner.View() + " " + styleValue.Render(m.operationLabel)}
 		if m.operationCancelling {
-			lines = append(lines, "  "+styleWarning.Render("cancelling..."))
+			content = append(content, "  "+styleWarning.Render("Cancelling..."))
 		}
 		start := 0
 		if len(m.progressLines) > 8 {
 			start = len(m.progressLines) - 8
 		}
 		for _, progress := range m.progressLines[start:] {
-			lines = append(lines, "  "+styleMuted.Render(progress))
+			content = append(content, "  "+styleMuted.Render(progress))
 		}
+		lines = append(lines, "")
+		lines = append(lines, calloutBox("IN PROGRESS", content, width)...)
 		return lines
 	}
 	if m.loadingUpdates {
-		lines = append(lines, "", m.spinner.View()+" checking managed updates...")
-		return lines
+		return append(lines, "", m.spinner.View()+" checking managed updates...")
 	}
 	if m.statusMessage != "" {
+		badge := styleOK.Render("[ok]")
 		style := styleOK
 		if m.statusIsError {
+			badge = styleError.Render("[err]")
 			style = styleError
 		}
 		lines = append(lines, "")
-		for _, wrapped := range wrap(m.statusMessage, width-2) {
-			lines = append(lines, style.Render(wrapped))
+		for index, line := range wrap(m.statusMessage, width-6) {
+			if index == 0 {
+				lines = append(lines, badge+" "+style.Render(line))
+			} else {
+				lines = append(lines, "      "+style.Render(line))
+			}
 		}
 	}
 	return lines
+}
+
+func confirmTitle(kind confirmKind) string {
+	switch kind {
+	case confirmInstallSDK:
+		return "INSTALL SDK"
+	case confirmInstallRuntime:
+		return "INSTALL RUNTIME"
+	case confirmRemoveSDK:
+		return "REMOVE SDK"
+	case confirmRemoveRuntime:
+		return "REMOVE RUNTIME"
+	case confirmUpdateSDK:
+		return "UPDATE SDK"
+	case confirmUpdateRuntime:
+		return "UPDATE RUNTIME"
+	default:
+		return "ACTION"
+	}
+}
+
+func calloutBox(title string, content []string, width int) []string {
+	inner := width - 4
+	if inner < 8 {
+		inner = 8
+	}
+	body := []string{styleTitle.Render(title)}
+	for _, line := range content {
+		body = append(body, fitLine(line, inner))
+	}
+	box := styleCallout.Width(width).Render(strings.Join(body, "\n"))
+	return strings.Split(box, "\n")
 }
 
 func listLabel(label string, focused bool) string {
