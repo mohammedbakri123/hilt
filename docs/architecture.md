@@ -63,7 +63,9 @@ cmd/hilt
    stages and verifies the toolchain, publishes it atomically, then records it
    in the manifest. `hilt sdk remove` reverses that only for manifest-owned
    roots. `hilt sdk outdated` reads metadata and reports newer same-channel
-   stable versions. The TUI remains read-only for managed mutations. `hilt sdk update` and `hilt runtime install/remove/outdated` extend the same install flow.
+   stable versions. `hilt sdk update` and `hilt runtime install/remove/outdated`
+   extend the same install flow. The TUI runs these same backend operations from
+   `tea.Cmd` values with context cancellation; it never performs I/O in Update.
 
 ## Contracts
 

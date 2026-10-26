@@ -33,7 +33,6 @@ Implemented (continued):
 
 Remaining:
 
-- TUI install/remove controls.
 - Arch/CachyOS pacman adapter with availability checks and explicit approval.
 
 ## Phase 3 — Projects and execution

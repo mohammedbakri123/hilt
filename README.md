@@ -32,12 +32,14 @@ Phase 2 managed SDKs provide:
 - `hilt sdk update <version> [--remove-old]` applies a managed SDK update.
 - `hilt runtime install <version> --framework all|netcore|aspnetcore`.
 - `hilt runtime remove <version>` and `hilt runtime outdated`.
+- Managed install, removal, and update actions in the TUI's SDKs & Runtimes
+  screen, with confirmation, cancellation, and streamed progress.
 - Read-wide discovery with write-private mutations: system and external SDKs
   are never modified or removed, and Hilt never uses `sudo` or edits `PATH`.
 
-Not implemented: TUI install/remove controls, package-manager writes, project
-scanning, builds, NuGet operations, and templates. The corresponding screens
-say so explicitly. See [docs/roadmap.md](docs/roadmap.md).
+Not implemented: package-manager writes, project scanning, builds, NuGet
+operations, and templates. The corresponding screens say so explicitly. See
+[docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 
