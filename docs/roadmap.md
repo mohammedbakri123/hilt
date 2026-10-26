@@ -5,7 +5,8 @@ package-manager adapter remains. Phase 3 project discovery is implemented;
 MSBuild evaluation, builds, and execution remain planned. Hilt now uses a
 single `~/hilt` home, configurable with `HILT_HOME`, with projects under
 `apps/` and internals under `.hilt/`. Commands that do not work are not
-registered, and unimplemented screens state that they are placeholders.
+registered, and unimplemented features show explicit empty states rather than
+dead destinations.
 
 ## Phase 2 — Managed SDKs (partially implemented)
 
@@ -52,10 +53,14 @@ Implemented:
 - TUI Projects & Solutions screen with background scanning, cancellation, and
   selection preserved across refreshes.
 - Single Hilt home layout with `apps/` and `.hilt/`, plus an atomic,
-  versioned state store for active and recent projects.
+  versioned state store package for active and recent projects.
+- Five-section TUI navigation, a global status line, a keymap-backed footer and
+  help view, and a project cockpit with list/detail panes, filtering, external
+  badges, and Overview/Packages/Data/Output tabs.
 
 Remaining:
 
+- Wire the state store into the TUI for active and recent projects.
 - Evaluated properties through MSBuild when available; declared-only values
   labeled as such.
 - Build, clean, restore, run, stop, and test with streaming output.

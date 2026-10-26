@@ -59,7 +59,7 @@ Phase 3 project discovery provides:
 
 Not implemented: MSBuild evaluation, builds, run/test execution, `global.json`
 writes, NuGet operations, and templates. Empty project tabs state each gap
-explicitly once tabs exist. See [docs/roadmap.md](docs/roadmap.md).
+explicitly. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 

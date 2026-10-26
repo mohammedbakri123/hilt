@@ -1653,7 +1653,28 @@ func TestProjectsSplitFocusAndScrolling(t *testing.T) {
 	}
 }
 
-func TestProjectsNarrowLayoutKeepsTabNavigation(t *testing.T) {
+func TestSectionNavigationUsesBrackets(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+	model = press(t, model, key('j', "j"))
+	if model.screen != ScreenHome {
+		t.Fatalf("tab or j changed section to %v", model.screen)
+	}
+	model = press(t, model, key(']', "]"))
+	if model.screen != ScreenProjects {
+		t.Fatalf("] selected %v, want Projects", model.screen)
+	}
+	model = press(t, model, key('[', "["))
+	if model.screen != ScreenHome {
+		t.Fatalf("[ selected %v, want Home", model.screen)
+	}
+	model = press(t, model, key('[', "["))
+	if model.screen != ScreenSettings {
+		t.Fatalf("[ did not wrap to Settings: %v", model.screen)
+	}
+}
+
+func TestProjectsNarrowLayoutKeepsSectionNavigation(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
 	model := openProjects(t, backend, 80, 24)
@@ -1661,8 +1682,16 @@ func TestProjectsNarrowLayoutKeepsTabNavigation(t *testing.T) {
 		t.Fatal("projects should use the stacked layout at 80 columns")
 	}
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+	if model.screen != ScreenProjects {
+		t.Fatalf("tab navigated to %v, want Projects", model.screen)
+	}
+	model = press(t, model, key(']', "]"))
 	if model.screen != ScreenSDKs {
-		t.Fatalf("tab navigated to %v, want SDKs", model.screen)
+		t.Fatalf("] navigated to %v, want SDKs", model.screen)
+	}
+	model = press(t, model, key('[', "["))
+	if model.screen != ScreenProjects {
+		t.Fatalf("[ navigated to %v, want Projects", model.screen)
 	}
 }
 
@@ -1767,7 +1796,7 @@ func TestProjectTabs(t *testing.T) {
 		t.Fatalf("overview tab missing:\n%s", plain)
 	}
 
-	model = press(t, model, key(']', "]"))
+	model = press(t, model, key('.', "."))
 	if model.projectTab != projectTabPackages {
 		t.Fatalf("tab = %v, want packages", model.projectTab)
 	}
@@ -1778,23 +1807,23 @@ func TestProjectTabs(t *testing.T) {
 		}
 	}
 
-	model = press(t, model, key(']', "]"))
+	model = press(t, model, key('.', "."))
 	plain = ansi.Strip(model.View().Content)
 	if !strings.Contains(plain, "[Data]") || !strings.Contains(plain, "No migrations loaded") {
 		t.Errorf("data tab missing:\n%s", plain)
 	}
 
-	model = press(t, model, key(']', "]"))
+	model = press(t, model, key('.', "."))
 	plain = ansi.Strip(model.View().Content)
 	if !strings.Contains(plain, "[Output]") || !strings.Contains(plain, "No build or run output yet") {
 		t.Errorf("output tab missing:\n%s", plain)
 	}
 
-	model = press(t, model, key(']', "]"))
+	model = press(t, model, key('.', "."))
 	if model.projectTab != projectTabOverview {
 		t.Fatalf("tab did not wrap to overview: %v", model.projectTab)
 	}
-	model = press(t, model, key('[', "["))
+	model = press(t, model, key(',', ","))
 	if model.projectTab != projectTabOutput {
 		t.Fatalf("tab did not wrap backwards to output: %v", model.projectTab)
 	}
@@ -1813,7 +1842,7 @@ func TestProjectTabsResetDetailScroll(t *testing.T) {
 	if model.projectDetailScroll == 0 {
 		t.Fatal("detail did not scroll")
 	}
-	model = press(t, model, key(']', "]"))
+	model = press(t, model, key('.', "."))
 	if model.projectDetailScroll != 0 {
 		t.Fatalf("tab change kept detail scroll %d", model.projectDetailScroll)
 	}

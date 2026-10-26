@@ -508,7 +508,7 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.screen == ScreenSDKs {
 		switch key {
-		case "tab":
+		case "tab", "shift+tab":
 			if m.sdkFocus == focusSDKs {
 				m.sdkFocus = focusRuntimes
 			} else {
@@ -543,15 +543,17 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.projectFiltering = true
 			return m, nil
 		}
-		if key == "tab" && m.projectSplit() {
-			m.toggleProjectFocus()
+		if key == "tab" || key == "shift+tab" {
+			if m.projectSplit() {
+				m.toggleProjectFocus()
+			}
 			return m, nil
 		}
 		switch key {
-		case "[":
+		case ",":
 			m.moveProjectTab(-1)
 			return m, nil
-		case "]":
+		case ".":
 			m.moveProjectTab(1)
 			return m, nil
 		case "up", "k":
@@ -576,20 +578,11 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch key {
-	case "tab", "right", "l":
+	case "]":
 		command := m.navigate(Screen((int(m.screen) + 1) % len(screens)))
 		return m, command
-	case "shift+tab", "left", "h":
+	case "[":
 		command := m.navigate(Screen((int(m.screen) - 1 + len(screens)) % len(screens)))
-		return m, command
-	case "up", "k":
-		command := m.navigate(Screen((int(m.screen) - 1 + len(screens)) % len(screens)))
-		return m, command
-	case "down", "j":
-		command := m.navigate(Screen((int(m.screen) + 1) % len(screens)))
-		return m, command
-	case "enter":
-		command := m.navigate(Screen(m.cursor))
 		return m, command
 	case "pgup", "ctrl+u":
 		m.scrollFocusedBy(-8)
