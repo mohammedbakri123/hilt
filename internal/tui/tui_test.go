@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -388,7 +389,7 @@ func key(code rune, text string) tea.KeyPressMsg {
 }
 
 func TestViewFitsLayouts(t *testing.T) {
-	for _, size := range []struct{ width, height int }{{40, 12}, {80, 24}, {160, 48}} {
+	for _, size := range []struct{ width, height int }{{40, 12}, {60, 20}, {80, 24}, {160, 48}} {
 		backend := newFakeBackend()
 		model := loadedModel(t, backend, size.width, size.height)
 		view := model.View()
@@ -410,12 +411,34 @@ func TestViewFitsLayouts(t *testing.T) {
 	}
 }
 
-func TestDashboardShowsInventory(t *testing.T) {
+func TestHomeShowsInventory(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
 	view := model.View().Content
-	for _, want := range []string{"Home", "SYSTEM", ".NET TOOLCHAIN", "10.0.112", "9.0.300", "CachyOS", "pacman", "/usr/share/dotnet/dotnet", "Selected SDK", "system"} {
+	for _, want := range []string{"Home", "SYSTEM", ".NET TOOLCHAIN", "10.0.112", "9.0.300", "CachyOS", "pacman", "/usr/share/dotnet/dotnet", "Selected SDK", "system", "PROJECTS", "Press 2 to scan projects"} {
 		if !strings.Contains(view, want) {
-			t.Errorf("dashboard missing %q", want)
+			t.Errorf("home missing %q", want)
+		}
+	}
+}
+
+func TestHomeShowsProjectScanSummary(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 120, 36)
+	if model.screen != ScreenHome {
+		model = press(t, model, key('1', "1"))
+	}
+	plain := ansi.Strip(model.View().Content)
+	result := projectFixture()
+	for _, want := range []string{
+		"PROJECTS",
+		"/work",
+		fmt.Sprintf("%d projects  ·  %d workspaces", len(result.Projects), len(result.Workspaces)),
+		"Selected project",
+		"Shop",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("home project summary missing %q", want)
 		}
 	}
 }
@@ -697,13 +720,13 @@ func TestSDKTablesShowColumns(t *testing.T) {
 	}
 }
 
-func TestDashboardFooterShowsInstallHint(t *testing.T) {
+func TestHomeFooterShowsInstallHint(t *testing.T) {
 	for _, width := range []int{80, 90} {
 		model := loadedModel(t, newFakeBackend(), width, 24)
 		lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 		footer := lines[len(lines)-1]
 		if !strings.Contains(footer, "i install SDK") || !strings.Contains(footer, "q quit") {
-			t.Fatalf("%d: dashboard footer missing actions: %q", width, footer)
+			t.Fatalf("%d: home footer missing actions: %q", width, footer)
 		}
 	}
 }
@@ -1131,11 +1154,11 @@ func TestRuntimeUpdateApplyUsesSelectedFramework(t *testing.T) {
 	}
 }
 
-func TestDashboardInstallShortcut(t *testing.T) {
+func TestHomeInstallShortcut(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 120, 36)
 	model = press(t, model, key('i', "i"))
 	if model.screen != ScreenSDKs || model.sdkFocus != focusSDKs || model.prompt != promptInstallSDK {
-		t.Fatalf("dashboard i did not open the SDK install prompt: screen=%v focus=%v prompt=%v", model.screen, model.sdkFocus, model.prompt)
+		t.Fatalf("home i did not open the SDK install prompt: screen=%v focus=%v prompt=%v", model.screen, model.sdkFocus, model.prompt)
 	}
 }
 
@@ -1186,7 +1209,7 @@ func openProjects(t *testing.T, backend fakeBackend, width, height int) Model {
 }
 
 func TestProjectsViewFitsLayouts(t *testing.T) {
-	for _, size := range []struct{ width, height int }{{40, 12}, {80, 24}, {160, 48}} {
+	for _, size := range []struct{ width, height int }{{40, 12}, {60, 20}, {80, 24}, {160, 48}} {
 		backend := newFakeBackend()
 		backend.projectResult = projectFixture()
 		model := openProjects(t, backend, size.width, size.height)
@@ -1307,7 +1330,7 @@ func TestStatusLineAppearsOnEveryScreen(t *testing.T) {
 		name  string
 		model Model
 	}{
-		{name: "dashboard", model: loadedModel(t, newFakeBackend(), 100, 30)},
+		{name: "home", model: loadedModel(t, newFakeBackend(), 100, 30)},
 		{name: "projects", model: openProjects(t, projectsBackend, 100, 30)},
 		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 100, 30), key('4', "4"))},
 		{name: "settings", model: press(t, loadedModel(t, newFakeBackend(), 100, 30), key('5', "5"))},
@@ -1398,7 +1421,7 @@ func TestKeymapHasNoConflicts(t *testing.T) {
 
 func TestKeymapDetectsDuplicateBindings(t *testing.T) {
 	conflicted := map[keyContext]keyContextSpec{
-		ctxDashboard: {Bindings: []keyBinding{
+		ctxHome: {Bindings: []keyBinding{
 			{Key: "q", Action: actionQuit, Label: "quit"},
 			{Key: "q", Action: actionHelp, Label: "help"},
 		}},
@@ -1429,7 +1452,7 @@ func TestKeymapActions(t *testing.T) {
 			t.Errorf("%s/%s = %q, %v; want %q", test.context, test.key, got, ok, test.want)
 		}
 	}
-	if _, ok := actionFor(ctxDashboard, "z"); ok {
+	if _, ok := actionFor(ctxHome, "z"); ok {
 		t.Error("unknown key should not resolve")
 	}
 }
@@ -1481,7 +1504,7 @@ func TestFooterMatchesKeymap(t *testing.T) {
 		{name: "sdk list", model: sdkList, context: ctxPromptSDKList},
 		{name: "runtime prompt", model: runtimePrompt, context: ctxPromptRuntime},
 		{name: "confirmation", model: confirmation, context: ctxConfirm},
-		{name: "dashboard", model: loadedModel(t, newFakeBackend(), 160, 40), context: ctxDashboard},
+		{name: "home", model: loadedModel(t, newFakeBackend(), 160, 40), context: ctxHome},
 		{name: "sdks", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('3', "3")), context: ctxSDKs},
 		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('4', "4")), context: ctxDiagnostics},
 		{name: "projects loading", model: projectsLoading, context: ctxProjectsLoading},

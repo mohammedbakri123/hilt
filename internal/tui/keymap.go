@@ -43,7 +43,7 @@ const (
 	ctxPromptSDKList   keyContext = "prompt-sdk-list"
 	ctxPromptRuntime   keyContext = "prompt-runtime"
 	ctxConfirm         keyContext = "confirm"
-	ctxDashboard       keyContext = "dashboard"
+	ctxHome            keyContext = "home"
 	ctxSDKs            keyContext = "sdks"
 	ctxDiagnostics     keyContext = "diagnostics"
 	ctxProjectsLoading keyContext = "projects-loading"
@@ -105,7 +105,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "enter/y", Action: actionConfirm, Label: "confirm", Compact: true},
 		{Key: "esc/n", Action: actionCancel, Label: "cancel", Compact: true},
 	}},
-	ctxDashboard: {CompactWidth: 100, Bindings: []keyBinding{
+	ctxHome: {CompactWidth: 100, Bindings: []keyBinding{
 		{Key: "↑/↓", Action: actionMove, Label: "sections", Compact: true},
 		{Key: "1-5", Action: actionJump, Label: "jump"},
 		{Key: "i", Action: actionInstall, Label: "install SDK", Compact: true},

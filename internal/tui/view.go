@@ -230,8 +230,8 @@ func (m Model) footerContext() keyContext {
 		return ctxPromptRuntime
 	case m.confirm != confirmNone:
 		return ctxConfirm
-	case m.screen == ScreenDashboard:
-		return ctxDashboard
+	case m.screen == ScreenHome:
+		return ctxHome
 	case m.screen == ScreenSDKs:
 		return ctxSDKs
 	case m.screen == ScreenDiagnostics:
@@ -311,8 +311,8 @@ func renderTooSmall(width, height int) string {
 
 func (m Model) screenLines(width int) []string {
 	switch m.screen {
-	case ScreenDashboard:
-		return m.dashboardLines(width)
+	case ScreenHome:
+		return m.homeLines(width)
 	case ScreenSDKs:
 		return m.sdkLines(width)
 	case ScreenDiagnostics:
@@ -326,7 +326,7 @@ func (m Model) screenLines(width int) []string {
 	}
 }
 
-func (m Model) dashboardLines(width int) []string {
+func (m Model) homeLines(width int) []string {
 	lines := sectionHeader("Home", width)
 
 	if m.backend == nil {
@@ -384,6 +384,33 @@ func (m Model) dashboardLines(width int) []string {
 		{title: "SYSTEM", content: system},
 		{title: ".NET TOOLCHAIN", content: toolchain},
 	}, width)...)
+
+	projectRoot := m.backend.Config().DefaultProjectDir
+	if projectRoot == "" {
+		projectRoot = m.backend.Paths().ProjectsRoot
+	}
+	if m.projectResult != nil && m.projectResult.Root != "" {
+		projectRoot = m.projectResult.Root
+	}
+	if projectRoot == "" {
+		projectRoot = "not configured"
+	}
+	projectContent := []string{kvSized("Projects root", projectRoot, 14)}
+	switch {
+	case m.projectsLoading:
+		projectContent = append(projectContent, m.spinner.View()+" scanning projects...")
+	case m.projectsErr != nil:
+		projectContent = append(projectContent, styleError.Render("Scan failed: "+m.projectsErr.Error()))
+	case m.projectResult != nil:
+		projectContent = append(projectContent, kvSized("Last scan", fmt.Sprintf("%d projects  ·  %d workspaces", len(m.projectResult.Projects), len(m.projectResult.Workspaces)), 14))
+		if project, ok := m.selectedProject(); ok {
+			projectContent = append(projectContent, kvSized("Selected project", project.Name, 14))
+		}
+	default:
+		projectContent = append(projectContent, kvSized("Next step", "Press 2 to scan projects", 14))
+	}
+	lines = append(lines, "")
+	lines = append(lines, panelBox("PROJECTS", projectContent, width)...)
 
 	if m.inventory != nil && !m.inventory.HasUsableHost() && len(m.inventory.SDKs) == 0 {
 		lines = append(lines, "")

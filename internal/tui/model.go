@@ -51,7 +51,7 @@ type Backend interface {
 type Screen int
 
 const (
-	ScreenDashboard Screen = iota
+	ScreenHome Screen = iota
 	ScreenProjects
 	ScreenSDKs
 	ScreenDiagnostics
@@ -181,8 +181,8 @@ type Model struct {
 func Now(backend Backend) Model {
 	return Model{
 		backend:          backend,
-		screen:           ScreenDashboard,
-		cursor:           int(ScreenDashboard),
+		screen:           ScreenHome,
+		cursor:           int(ScreenHome),
 		width:            80,
 		height:           24,
 		loadingInventory: true,
@@ -533,7 +533,7 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.screen == ScreenDashboard && key == "i" {
+	if m.screen == ScreenHome && key == "i" {
 		return m, m.startSDKPrompt()
 	}
 
