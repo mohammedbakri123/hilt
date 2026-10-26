@@ -35,6 +35,9 @@ const (
 	actionBuild           keyAction = "build"
 	actionToggleOutput    keyAction = "toggle-output"
 	actionFollowOutput    keyAction = "follow-output"
+	actionOpenDirectory   keyAction = "open-directory"
+	actionChooseRoot      keyAction = "choose-root"
+	actionToggleHidden    keyAction = "toggle-hidden"
 )
 
 type keyContext string
@@ -55,6 +58,7 @@ const (
 	ctxProjects        keyContext = "projects"
 	ctxProjectSplit    keyContext = "project-split"
 	ctxProjectFilter   keyContext = "project-filter"
+	ctxProjectRoot     keyContext = "project-root"
 	ctxSettings        keyContext = "settings"
 	ctxOutput          keyContext = "output"
 	ctxBuild           keyContext = "build"
@@ -155,6 +159,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
+		{Key: "p", Action: actionChooseRoot, Label: "root", Compact: true},
 		{Key: ", .", Action: actionProjectTab, Label: "tab"},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
@@ -167,6 +172,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "enter", Action: actionConfirm, Label: "activate", Compact: true},
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
+		{Key: "p", Action: actionChooseRoot, Label: "root", Compact: true},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
@@ -195,6 +201,14 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "type", Action: actionFilter, Label: "filter", Compact: true},
 		{Key: "enter", Action: actionConfirm, Label: "keep", Compact: true},
 		{Key: "esc", Action: actionCancel, Label: "clear", Compact: true},
+	}},
+	ctxProjectRoot: {CompactWidth: 86, Bindings: []keyBinding{
+		{Key: "esc", Action: actionCancel, Label: "cancel", Compact: true},
+		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "enter", Action: actionOpenDirectory, Label: "open", Compact: true},
+		{Key: "s", Action: actionChooseRoot, Label: "choose", Compact: true},
+		{Key: ".", Action: actionToggleHidden, Label: "hidden", Help: "show or hide dot-directories"},
+		{Key: "q", Action: actionQuit, Label: "quit"},
 	}},
 	ctxSettings: {CompactWidth: 72, Bindings: []keyBinding{
 		{Key: "[/]", Action: actionNavigate, Label: "section", Compact: true},
@@ -226,7 +240,7 @@ var keymap = map[keyContext]keyContextSpec{
 	ctxHelpView: {Bindings: []keyBinding{
 		{Key: "r", Action: actionRefresh, Label: "refresh", Help: "refresh inventory"},
 		{Key: "d", Action: actionDoctor, Label: "doctor", Help: "run diagnostics"},
-		{Key: "b", Action: actionBuild, Label: "build", Help: "build the selected project"},
+		{Key: "b / p", Action: actionBuild, Label: "build", Help: "build selected project / choose scan root"},
 		{Key: "o", Action: actionToggleOutput, Label: "output", Help: "open or close the output drawer"},
 		{Key: "f", Action: actionFollowOutput, Label: "follow", Help: "follow or pause output"},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll", Help: "scroll content or output"},
@@ -263,6 +277,16 @@ func footerBindings(context keyContext, width int) []keyBinding {
 		for _, binding := range bindings {
 			switch binding.Action {
 			case actionToggleOutput, actionFollowOutput, actionHelp, actionQuit:
+				narrow = append(narrow, binding)
+			}
+		}
+		bindings = narrow
+	}
+	if context == ctxProjectRoot && width < 56 {
+		narrow := make([]keyBinding, 0, 3)
+		for _, binding := range bindings {
+			switch binding.Action {
+			case actionCancel, actionOpenDirectory, actionChooseRoot:
 				narrow = append(narrow, binding)
 			}
 		}

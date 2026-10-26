@@ -183,6 +183,8 @@ type Model struct {
 	projectCancel       context.CancelFunc
 	projectRequest      int
 
+	rootPicker projectRootPicker
+
 	updates        []install.Update
 	runtimeUpdates []install.Update
 	loadingUpdates bool
@@ -454,6 +456,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case projectsMsg:
 		return m.handleProjectsMsg(message)
 
+	case pickerDirectoriesMsg:
+		return m.handlePickerDirectories(message), nil
+
+	case projectRootSavedMsg:
+		return m.handleProjectRootSaved(message)
+
 	case projectOpenedMsg:
 		if message.err != nil {
 			m.setStatus("Could not remember project: "+message.err.Error(), true)
@@ -491,6 +499,10 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.quitConfirm {
 		return m.handleQuitConfirmKey(message)
+	}
+
+	if m.rootPicker.open {
+		return m.handleProjectRootPickerKey(message)
 	}
 
 	if m.busy() {
@@ -644,6 +656,8 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "p":
+			return m, m.openProjectRootPicker()
 		case "b":
 			return m, m.startBuild()
 		case ",":

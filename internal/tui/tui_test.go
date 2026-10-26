@@ -15,6 +15,7 @@ import (
 	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/diagnostics"
 	"io"
+	"path/filepath"
 
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/execution"
@@ -119,10 +120,28 @@ type fakeBackend struct {
 	buildRequests       *[]execution.BuildRequest
 	buildRecords        *[]state.BuildTarget
 	buildRecordErr      error
+
+	directories        map[string][]string
+	directoryErr       map[string]error
+	directoryCalls     *[]pickerDirectoryCall
+	defaultProjectDir  *string
+	setProjectDirCalls *[]string
+	setProjectDirErr   error
 }
 
-func (f fakeBackend) Version() string          { return "test" }
-func (f fakeBackend) Config() config.Config    { return f.config }
+type pickerDirectoryCall struct {
+	path   string
+	hidden bool
+}
+
+func (f fakeBackend) Version() string { return "test" }
+func (f fakeBackend) Config() config.Config {
+	current := f.config
+	if f.defaultProjectDir != nil {
+		current.DefaultProjectDir = *f.defaultProjectDir
+	}
+	return current
+}
 func (f fakeBackend) Paths() platform.Paths    { return f.paths }
 func (f fakeBackend) ConfigWarnings() []string { return f.configWarnings }
 func (f fakeBackend) State() state.State {
@@ -377,10 +396,36 @@ func (f fakeBackend) ScanProjects(context.Context, string, bool) (projects.Resul
 	}
 	return f.projectResult, f.projectErr
 }
-func (f fakeBackend) ListDirectories(context.Context, string, bool) ([]string, error) {
-	return nil, nil
+func (f fakeBackend) ListDirectories(_ context.Context, path string, includeHidden bool) ([]string, error) {
+	if f.directoryCalls != nil {
+		*f.directoryCalls = append(*f.directoryCalls, pickerDirectoryCall{path: path, hidden: includeHidden})
+	}
+	if err := f.directoryErr[path]; err != nil {
+		return nil, err
+	}
+	entries := f.directories[path]
+	result := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !includeHidden && strings.HasPrefix(filepath.Base(entry), ".") {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result, nil
 }
-func (f fakeBackend) SetDefaultProjectDir(string) error { return nil }
+
+func (f fakeBackend) SetDefaultProjectDir(path string) error {
+	if f.setProjectDirCalls != nil {
+		*f.setProjectDirCalls = append(*f.setProjectDirCalls, path)
+	}
+	if f.setProjectDirErr != nil {
+		return f.setProjectDirErr
+	}
+	if f.defaultProjectDir != nil {
+		*f.defaultProjectDir = path
+	}
+	return nil
+}
 
 func (f fakeBackend) record(name string) {
 	if f.calls != nil {
@@ -2472,5 +2517,232 @@ func TestBuildRecordFailureIsVisible(t *testing.T) {
 	}
 	if !model.statusIsError {
 		t.Fatal("record failure should be reported as an error")
+	}
+}
+
+func withProjectRoot(backend fakeBackend, root string) fakeBackend {
+	backend.config.DefaultProjectDir = root
+	dir := root
+	backend.defaultProjectDir = &dir
+	return backend
+}
+
+func openRootPicker(t *testing.T, backend fakeBackend, width, height int) Model {
+	t.Helper()
+	model := openProjects(t, backend, width, height)
+	updated, command := model.Update(key('p', "p"))
+	model = updated.(Model)
+	if !model.rootPicker.open {
+		t.Fatal("p did not open the project root picker")
+	}
+	if command == nil {
+		t.Fatal("opening the project root picker returned no directory command")
+	}
+	return apply(t, model, command())
+}
+
+func TestProjectRootPickerOpensAtConfiguredRoot(t *testing.T) {
+	backend := withProjectRoot(newFakeBackend(), "/work")
+	backend.directories = map[string][]string{
+		"/work": {"/work/apps", "/work/tools"},
+	}
+	model := openProjects(t, backend, 100, 30)
+	updated, command := model.Update(key('p', "p"))
+	model = updated.(Model)
+	if !model.rootPicker.open {
+		t.Fatal("p did not open the project root picker")
+	}
+	if command == nil {
+		t.Fatal("opening the project root picker returned no directory command")
+	}
+	model = apply(t, model, command())
+	if model.rootPicker.loading {
+		t.Fatal("picker should finish loading directories")
+	}
+	if model.rootPicker.path != "/work" {
+		t.Fatalf("picker path = %q, want /work", model.rootPicker.path)
+	}
+	if model.rootPicker.cursor != 1 {
+		t.Fatalf("picker cursor = %d, want first child at 1", model.rootPicker.cursor)
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"CHOOSE PROJECT ROOT", "/work", "apps/", "tools/", ".."} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("picker missing %q: %q", want, plain)
+		}
+	}
+	if model.footerContext() != ctxProjectRoot {
+		t.Fatalf("footer context = %q, want %q", model.footerContext(), ctxProjectRoot)
+	}
+}
+
+func TestProjectRootPickerNavigatesAndSavesCurrentRoot(t *testing.T) {
+	saved := []string(nil)
+	backend := withProjectRoot(newFakeBackend(), "/work")
+	backend.directories = map[string][]string{
+		"/work":               {"/work/apps", "/work/tools"},
+		"/work/apps":          {"/work/apps/Shop", "/work/apps/Library"},
+		"/work/apps/Shop":     {},
+		"/work/apps/Library":  {},
+		"/work/apps/Other":    {},
+		"/work/apps/Third":    {},
+		"/work/apps/Archived": {},
+	}
+	backend.setProjectDirCalls = &saved
+	model := openRootPicker(t, backend, 100, 30)
+
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("enter on apps/ returned no directory command")
+	}
+	model = apply(t, model, command())
+	if model.rootPicker.path != "/work/apps" {
+		t.Fatalf("picker path = %q, want /work/apps", model.rootPicker.path)
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyDown})
+	if model.rootPicker.cursor != 2 {
+		t.Fatalf("picker cursor = %d, want 2", model.rootPicker.cursor)
+	}
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("enter on Library/ returned no directory command")
+	}
+	model = apply(t, model, command())
+	if model.rootPicker.path != "/work/apps/Library" {
+		t.Fatalf("picker path = %q, want /work/apps/Library", model.rootPicker.path)
+	}
+
+	updated, command = model.Update(key('s', "s"))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("s returned no save command")
+	}
+	if !model.rootPicker.saving {
+		t.Fatal("picker should be saving")
+	}
+	model = apply(t, model, command())
+	if model.rootPicker.open {
+		t.Fatal("picker should close after saving")
+	}
+	if len(saved) != 1 || saved[0] != "/work/apps/Library" {
+		t.Fatalf("saved roots = %v, want [/work/apps/Library]", saved)
+	}
+	if got := model.projectScanRoot(); got != "/work/apps/Library" {
+		t.Fatalf("project scan root = %q, want /work/apps/Library", got)
+	}
+	if !strings.Contains(model.statusMessage, "Project root: /work/apps/Library") {
+		t.Fatalf("status = %q, want saved root", model.statusMessage)
+	}
+	if !model.projectsLoading {
+		t.Fatal("saving the root should start a project rescan")
+	}
+}
+
+func TestProjectRootPickerTogglesHiddenDirectories(t *testing.T) {
+	calls := []pickerDirectoryCall(nil)
+	backend := withProjectRoot(newFakeBackend(), "/work")
+	backend.directories = map[string][]string{
+		"/work": {"/work/apps", "/work/.git", "/work/tools"},
+	}
+	backend.directoryCalls = &calls
+	model := openRootPicker(t, backend, 100, 30)
+	if strings.Contains(ansi.Strip(model.View().Content), ".git/") {
+		t.Fatal("hidden directories should be hidden initially")
+	}
+
+	updated, command := model.Update(key('.', "."))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal(". returned no directory command")
+	}
+	model = apply(t, model, command())
+	if !model.rootPicker.hidden {
+		t.Fatal("picker should show hidden directories")
+	}
+	if !strings.Contains(ansi.Strip(model.View().Content), ".git/") {
+		t.Fatal("hidden directory was not shown")
+	}
+	if len(calls) < 2 || calls[len(calls)-1].hidden != true {
+		t.Fatalf("directory calls = %#v, want final hidden=true", calls)
+	}
+}
+
+func TestProjectRootPickerReadErrorKeepsModalOpen(t *testing.T) {
+	backend := withProjectRoot(newFakeBackend(), "/work")
+	backend.directoryErr = map[string]error{"/work": errors.New("permission denied")}
+	model := openRootPicker(t, backend, 100, 30)
+	if model.rootPicker.loadErr == nil {
+		t.Fatal("expected directory read error")
+	}
+	plain := ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "Cannot read this folder") || !strings.Contains(plain, "permission denied") {
+		t.Fatalf("picker missing read error: %q", plain)
+	}
+	updated, command := model.Update(key('s', "s"))
+	model = updated.(Model)
+	if command != nil || !model.rootPicker.open {
+		t.Fatalf("choose should be blocked on read error: open=%v command=%v", model.rootPicker.open, command)
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.rootPicker.open {
+		t.Fatal("esc should close the picker")
+	}
+}
+
+func TestProjectRootPickerSaveFailureKeepsModalOpen(t *testing.T) {
+	saved := []string(nil)
+	backend := withProjectRoot(newFakeBackend(), "/work")
+	backend.setProjectDirCalls = &saved
+	backend.setProjectDirErr = errors.New("disk full")
+	model := openRootPicker(t, backend, 100, 30)
+
+	updated, command := model.Update(key('s', "s"))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("s returned no save command")
+	}
+	model = apply(t, model, command())
+	if !model.rootPicker.open {
+		t.Fatal("picker should stay open after a save failure")
+	}
+	if model.rootPicker.saveErr == nil {
+		t.Fatal("expected save error")
+	}
+	plain := ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "Could not save") || !strings.Contains(plain, "disk full") {
+		t.Fatalf("picker missing save error: %q", plain)
+	}
+	if len(saved) != 1 || saved[0] != "/work" {
+		t.Fatalf("save calls = %v, want [/work]", saved)
+	}
+}
+
+func TestProjectRootPickerFitsLayouts(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{40, 12}, {60, 20}, {80, 24}, {160, 48}} {
+		backend := withProjectRoot(newFakeBackend(), "/work")
+		backend.directories = map[string][]string{
+			"/work": {
+				"/work/Apps", "/work/Infrastructure", "/work/Libraries",
+				"/work/Services", "/work/Tests", "/work/Tools",
+				"/work/Web", "/work/Workers",
+			},
+		}
+		model := openRootPicker(t, backend, size.width, size.height)
+		view := model.View()
+		lines := strings.Split(view.Content, "\n")
+		if len(lines) != size.height {
+			t.Errorf("%dx%d: got %d lines, want %d", size.width, size.height, len(lines), size.height)
+		}
+		for index, line := range lines {
+			if width := ansi.StringWidth(line); width > size.width {
+				t.Errorf("%dx%d: line %d width %d: %q", size.width, size.height, index, width, line)
+			}
+		}
+		if !strings.Contains(ansi.Strip(view.Content), "CHOOSE PROJECT ROOT") {
+			t.Errorf("%dx%d: picker title missing", size.width, size.height)
+		}
 	}
 }

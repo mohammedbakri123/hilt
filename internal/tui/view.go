@@ -88,6 +88,9 @@ func (m Model) render(width, height int) string {
 	if m.quitConfirm {
 		content = overlayCentered(content, m.renderQuitDialog(width), width, height)
 	}
+	if m.rootPicker.open {
+		content = overlayCentered(content, m.renderProjectRootPicker(width, height), width, height)
+	}
 	return content
 }
 
@@ -222,6 +225,8 @@ func (m Model) footerContext() keyContext {
 	switch {
 	case m.quitConfirm:
 		return ctxQuitConfirm
+	case m.rootPicker.open:
+		return ctxProjectRoot
 	case m.showHelp:
 		return ctxHelp
 	case m.operationRunning:
@@ -569,6 +574,9 @@ func (m Model) projectLines(width int) []string {
 	}
 	if m.projectSplit() {
 		summary += "  ·  " + styleMuted.Render("focus: "+m.focusLabel())
+	}
+	if result.Root != "" {
+		summary += "  ·  " + styleMuted.Render("root "+pickerPath(result.Root, width-12))
 	}
 	lines = append(lines, styleMuted.Render(summary))
 
@@ -1293,7 +1301,7 @@ func (m Model) settingsLines(width int) []string {
 		kv("Vim keys", fmt.Sprintf("%t", config.UI.VimKeys)),
 		kv("Scan exclusions", strings.Join(config.ScanExclusions, ", ")),
 	}
-	for _, line := range wrap("Settings editing is read-only. Edit the configuration file directly.", width-6) {
+	for _, line := range wrap("Settings editing is read-only. Press p in Projects to change the scan root, or edit the configuration file directly.", width-6) {
 		preferenceContent = append(preferenceContent, styleMuted.Render(line))
 	}
 	lines = append(lines, panelBox("PREFERENCES", preferenceContent, width)...)
