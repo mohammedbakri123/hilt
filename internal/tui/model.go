@@ -49,6 +49,8 @@ type Backend interface {
 	RemoveRuntime(ctx context.Context, version string) (install.Removal, error)
 	CheckRuntimeUpdates(ctx context.Context) ([]install.Update, error)
 	ScanProjects(ctx context.Context, root string, includeHidden bool) (projects.Result, error)
+	ListDirectories(ctx context.Context, path string, includeHidden bool) ([]string, error)
+	SetDefaultProjectDir(path string) error
 	BuildProject(ctx context.Context, request execution.BuildRequest, stdout, stderr io.Writer) (execution.Result, error)
 	RecordBuildTarget(target state.BuildTarget) error
 }

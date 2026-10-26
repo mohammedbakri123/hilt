@@ -377,6 +377,10 @@ func (f fakeBackend) ScanProjects(context.Context, string, bool) (projects.Resul
 	}
 	return f.projectResult, f.projectErr
 }
+func (f fakeBackend) ListDirectories(context.Context, string, bool) ([]string, error) {
+	return nil, nil
+}
+func (f fakeBackend) SetDefaultProjectDir(string) error { return nil }
 
 func (f fakeBackend) record(name string) {
 	if f.calls != nil {

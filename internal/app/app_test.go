@@ -3,11 +3,14 @@ package app
 import (
 	"context"
 	"crypto/sha512"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mohammedbakri123/hilt/internal/config"
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
 	"github.com/mohammedbakri123/hilt/internal/install"
 	"github.com/mohammedbakri123/hilt/internal/projects"
@@ -476,5 +479,176 @@ func TestNewSurfacesCorruptState(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("state warning missing: %v", application.ConfigWarnings())
+	}
+}
+
+func TestListDirectories(t *testing.T) {
+	home, _ := testAppEnv(t)
+	root := filepath.Join(home, "projects")
+	for _, name := range []string{"alpha", "beta", ".hidden"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "alpha"), filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+
+	application := New("test")
+	directories, err := application.ListDirectories(context.Background(), root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "alpha"), filepath.Join(root, "beta")}
+	if strings.Join(directories, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("directories = %v, want %v", directories, want)
+	}
+
+	directories, err = application.ListDirectories(context.Background(), root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []string{filepath.Join(root, ".hidden"), filepath.Join(root, "alpha"), filepath.Join(root, "beta")}
+	if strings.Join(directories, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("hidden directories = %v, want %v", directories, want)
+	}
+
+	link := filepath.Join(home, "projects-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	directories, err = application.ListDirectories(context.Background(), link, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(directories) != 2 || directories[0] != want[1] || directories[1] != want[2] {
+		t.Fatalf("canonical directories = %v", directories)
+	}
+
+	if _, err := application.ListDirectories(context.Background(), filepath.Join(root, "notes.txt"), false); err == nil {
+		t.Fatal("expected a file listing error")
+	}
+	if _, err := application.ListDirectories(context.Background(), filepath.Join(home, "missing"), false); err == nil {
+		t.Fatal("expected a missing directory error")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := application.ListDirectories(ctx, root, false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error = %v", err)
+	}
+}
+
+func TestSetDefaultProjectDirPersists(t *testing.T) {
+	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
+	configDir := filepath.Join(hiltHome, ".hilt")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	content := `{"schemaVersion":1,"defaultProjectDir":"/old","futureSetting":{"enabled":true}}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", hiltHome)
+
+	target := filepath.Join(home, "work")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(home, "work-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	application := New("test")
+	if err := application.SetDefaultProjectDir(link); err != nil {
+		t.Fatalf("SetDefaultProjectDir: %v", err)
+	}
+	if got := application.Config().DefaultProjectDir; got != target {
+		t.Fatalf("DefaultProjectDir = %q, want %q", got, target)
+	}
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("config permissions = %o, want 600", info.Mode().Perm())
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var saved string
+	if err := json.Unmarshal(raw["defaultProjectDir"], &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved != target {
+		t.Errorf("saved defaultProjectDir = %q, want %q", saved, target)
+	}
+	if _, ok := raw["futureSetting"]; !ok {
+		t.Fatalf("futureSetting was dropped: %s", data)
+	}
+
+	reloaded := New("test")
+	if got := reloaded.Config().DefaultProjectDir; got != target {
+		t.Errorf("reloaded DefaultProjectDir = %q, want %q", got, target)
+	}
+}
+
+func TestSetDefaultProjectDirRejectsInvalidPaths(t *testing.T) {
+	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", hiltHome)
+	application := New("test")
+	original := application.Config().DefaultProjectDir
+
+	file := filepath.Join(home, "file.txt")
+	if err := os.WriteFile(file, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"", "relative/path", file, filepath.Join(home, "missing")} {
+		if err := application.SetDefaultProjectDir(path); err == nil {
+			t.Errorf("SetDefaultProjectDir(%q) succeeded", path)
+		}
+	}
+	if got := application.Config().DefaultProjectDir; got != original {
+		t.Fatalf("invalid path changed config to %q", got)
+	}
+}
+
+func TestSetDefaultProjectDirSaveFailureLeavesConfig(t *testing.T) {
+	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", hiltHome)
+	application := New("test")
+	original := application.Config().DefaultProjectDir
+
+	target := filepath.Join(home, "work")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(home, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	application.configStore = config.Store{Path: filepath.Join(blocker, "config.json")}
+
+	if err := application.SetDefaultProjectDir(target); err == nil {
+		t.Fatal("expected a save error")
+	}
+	if got := application.Config().DefaultProjectDir; got != original {
+		t.Fatalf("failed save changed config to %q", got)
 	}
 }

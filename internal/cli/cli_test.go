@@ -68,6 +68,10 @@ func (f fakeBackend) BuildProject(context.Context, execution.BuildRequest, io.Wr
 func (f fakeBackend) RecordBuildTarget(state.BuildTarget) error {
 	return nil
 }
+func (f fakeBackend) ListDirectories(context.Context, string, bool) ([]string, error) {
+	return nil, nil
+}
+func (f fakeBackend) SetDefaultProjectDir(string) error { return nil }
 func (f fakeBackend) RecordProjectOpen(string, string) error {
 	return nil
 }

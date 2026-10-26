@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,8 @@ type App struct {
 	platform       platform.Info
 	paths          platform.Paths
 	config         config.Config
+	configStore    config.Store
+	configMu       sync.RWMutex
 	configWarnings []string
 	runner         process.Runner
 	locator        dotnet.Locator
@@ -89,6 +92,7 @@ func New(version string) *App {
 		platform:       info,
 		paths:          paths,
 		config:         cfg,
+		configStore:    store,
 		configWarnings: warnings,
 		runner:         process.ExecRunner{},
 		locator: dotnet.Locator{
@@ -119,8 +123,15 @@ func (a *App) Platform() platform.Info { return a.platform }
 // Paths returns the resolved Hilt home layout.
 func (a *App) Paths() platform.Paths { return a.paths }
 
-// Config returns the loaded configuration.
-func (a *App) Config() config.Config { return a.config }
+// Config returns a snapshot of the loaded configuration.
+func (a *App) Config() config.Config {
+	a.configMu.RLock()
+	defer a.configMu.RUnlock()
+	current := a.config
+	current.RecentProjects = append([]config.RecentProject(nil), current.RecentProjects...)
+	current.ScanExclusions = append([]string(nil), current.ScanExclusions...)
+	return current
+}
 
 // ConfigWarnings returns non-fatal configuration problems.
 func (a *App) ConfigWarnings() []string {
@@ -265,7 +276,7 @@ func (a *App) InstallSDK(ctx context.Context, plan install.Plan, progress io.Wri
 	if err != nil {
 		return install.Result{}, err
 	}
-	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.Config().ManagedRoot); loadErr == nil {
 		a.locator.Ownership = manifest
 	}
 	return result, nil
@@ -277,7 +288,7 @@ func (a *App) RemoveSDK(ctx context.Context, version string) (install.Removal, e
 	if err != nil {
 		return install.Removal{}, a.removalError(ctx, install.ProductSDK, version, err)
 	}
-	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.Config().ManagedRoot); loadErr == nil {
 		a.locator.Ownership = manifest
 	}
 	return removal, nil
@@ -298,8 +309,9 @@ func (a *App) AvailableSDKs(ctx context.Context, allowPrerelease bool) ([]instal
 // the configured default project directory, then the Hilt projects root. The
 // current directory is only used when no other root is available.
 func (a *App) ScanProjects(ctx context.Context, root string, includeHidden bool) (projects.Result, error) {
+	current := a.Config()
 	if root == "" {
-		root = a.config.DefaultProjectDir
+		root = current.DefaultProjectDir
 	}
 	if root == "" {
 		root = a.paths.ProjectsRoot
@@ -309,9 +321,90 @@ func (a *App) ScanProjects(ctx context.Context, root string, includeHidden bool)
 	}
 	return projects.Scan(ctx, projects.Options{
 		Root:          root,
-		Exclusions:    a.config.ScanExclusions,
+		Exclusions:    current.ScanExclusions,
 		IncludeHidden: includeHidden,
 	})
+}
+
+// ListDirectories returns the absolute paths of directories directly under
+// path. Symlinked directories are omitted so callers cannot walk outside the
+// selected tree accidentally.
+func (a *App) ListDirectories(ctx context.Context, path string, includeHidden bool) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	root, err := canonicalDirectory(path)
+	if err != nil {
+		return nil, fmt.Errorf("list directories: %w", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("list directories in %s: %w", root, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	directories := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
+			continue
+		}
+		if !includeHidden && strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		directories = append(directories, filepath.Join(root, entry.Name()))
+	}
+	sort.Strings(directories)
+	return directories, nil
+}
+
+// SetDefaultProjectDir validates and persists the directory the Projects
+// screen scans by default.
+func (a *App) SetDefaultProjectDir(path string) error {
+	root, err := canonicalDirectory(path)
+	if err != nil {
+		return fmt.Errorf("set default project directory: %w", err)
+	}
+
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	next := a.config
+	next.SchemaVersion = config.CurrentSchemaVersion
+	next.DefaultProjectDir = root
+	if err := a.configStore.Save(next); err != nil {
+		return fmt.Errorf("save configuration: %w", err)
+	}
+	a.config = next
+	return nil
+}
+
+func canonicalDirectory(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("%s is not an absolute path", path)
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", absolute, err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", resolved, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", resolved)
+	}
+	return resolved, nil
 }
 
 // InspectProject parses one project or solution file.
@@ -331,7 +424,7 @@ func (a *App) UpdateSDK(ctx context.Context, version string, removeOld bool, pro
 		}
 		return result, err
 	}
-	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.Config().ManagedRoot); loadErr == nil {
 		a.locator.Ownership = manifest
 	}
 	return result, nil
@@ -362,7 +455,7 @@ func (a *App) InstallRuntime(ctx context.Context, plan install.RuntimePlan, prog
 	if err != nil {
 		return install.RuntimeResult{}, err
 	}
-	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.Config().ManagedRoot); loadErr == nil {
 		a.locator.Ownership = manifest
 	}
 	return result, nil
@@ -374,7 +467,7 @@ func (a *App) RemoveRuntime(ctx context.Context, version string) (install.Remova
 	if err != nil {
 		return install.Removal{}, a.removalError(ctx, install.ProductRuntime, version, err)
 	}
-	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.config.ManagedRoot); loadErr == nil {
+	if manifest, loadErr := install.Load(a.paths.InstallManifestFile(), a.Config().ManagedRoot); loadErr == nil {
 		a.locator.Ownership = manifest
 	}
 	return removal, nil
@@ -447,7 +540,7 @@ func productLabel(product install.ProductKind) string {
 
 func (a *App) installer() install.Installer {
 	return install.Installer{
-		ManagedRoot:  a.config.ManagedRoot,
+		ManagedRoot:  a.Config().ManagedRoot,
 		ManifestPath: a.paths.InstallManifestFile(),
 		LockPath:     a.paths.InstallLockFile(),
 		Runner:       a.runner,
@@ -474,7 +567,7 @@ func (a *App) Diagnose(ctx context.Context) diagnostics.Report {
 		Version:        a.version,
 		Platform:       a.platform,
 		Paths:          a.paths,
-		Config:         a.config,
+		Config:         a.Config(),
 		ConfigWarnings: a.ConfigWarnings(),
 		LookPath:       a.lookPath,
 		Stat:           os.Stat,
