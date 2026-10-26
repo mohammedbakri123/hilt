@@ -1185,6 +1185,23 @@ func openProjects(t *testing.T, backend fakeBackend, width, height int) Model {
 	return apply(t, model, command())
 }
 
+func TestProjectsViewFitsLayouts(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{40, 12}, {80, 24}, {160, 48}} {
+		backend := newFakeBackend()
+		backend.projectResult = projectFixture()
+		model := openProjects(t, backend, size.width, size.height)
+		lines := strings.Split(model.View().Content, "\n")
+		if len(lines) != size.height {
+			t.Errorf("%dx%d: got %d lines, want %d", size.width, size.height, len(lines), size.height)
+		}
+		for index, line := range lines {
+			if width := ansi.StringWidth(line); width > size.width {
+				t.Errorf("%dx%d: line %d width %d: %q", size.width, size.height, index, width, line)
+			}
+		}
+	}
+}
+
 func TestProjectsScreenScansAndShowsMetadata(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
