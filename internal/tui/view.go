@@ -96,7 +96,7 @@ func (m Model) renderQuitDialog(width int) string {
 		"An operation is still running:",
 		styleValue.Render(m.busyLabel()),
 		"",
-		"Quitting interrupts it. Press esc to stay, or cancel the operation first with esc.",
+		"Quitting interrupts it. Press esc to stay; cancel the operation first if you want to stop it.",
 		"",
 		styleKey.Render("y / enter") + "  quit anyway",
 		styleKey.Render("esc / n") + "     stay",

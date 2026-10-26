@@ -1520,3 +1520,26 @@ func TestHelpMatchesKeymap(t *testing.T) {
 		}
 	}
 }
+
+func TestQuitDuringUpdateCheckRequiresConfirmation(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	model.loadingUpdates = true
+
+	updated, command := model.Update(key('q', "q"))
+	model = updated.(Model)
+	if command != nil || !model.quitConfirm {
+		t.Fatalf("q during update check should open confirmation: confirm=%v command=%v", model.quitConfirm, command)
+	}
+	if !model.loadingUpdates || model.operationCancelling {
+		t.Fatalf("update check state changed: loading=%v cancelling=%v", model.loadingUpdates, model.operationCancelling)
+	}
+	plain := ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "Checking for managed updates") {
+		t.Fatalf("quit confirmation should name the update check: %q", plain)
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.quitConfirm || !model.loadingUpdates {
+		t.Fatalf("esc should stay in the update check: confirm=%v loading=%v", model.quitConfirm, model.loadingUpdates)
+	}
+}
