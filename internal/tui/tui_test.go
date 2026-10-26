@@ -413,7 +413,7 @@ func TestViewFitsLayouts(t *testing.T) {
 func TestDashboardShowsInventory(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
 	view := model.View().Content
-	for _, want := range []string{"Dashboard", "SYSTEM", ".NET TOOLCHAIN", "10.0.112", "9.0.300", "CachyOS", "pacman", "/usr/share/dotnet/dotnet", "Selected SDK", "system"} {
+	for _, want := range []string{"Home", "SYSTEM", ".NET TOOLCHAIN", "10.0.112", "9.0.300", "CachyOS", "pacman", "/usr/share/dotnet/dotnet", "Selected SDK", "system"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
@@ -422,7 +422,7 @@ func TestDashboardShowsInventory(t *testing.T) {
 
 func TestNavigation(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	if model.screen != ScreenSDKs {
 		t.Fatalf("screen = %v, want SDKs", model.screen)
 	}
@@ -435,7 +435,7 @@ func TestNavigation(t *testing.T) {
 		t.Errorf("SDK screen missing selection: %q", view)
 	}
 
-	model = press(t, model, key('7', "7"))
+	model = press(t, model, key('4', "4"))
 	if model.screen != ScreenDiagnostics {
 		t.Fatalf("screen = %v, want Diagnostics", model.screen)
 	}
@@ -543,7 +543,7 @@ func TestScrollingClamps(t *testing.T) {
 		})
 	}
 	model := loadedModel(t, backend, 80, 24)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if model.sdkScroll <= 0 {
 		t.Fatal("pgdown did not scroll")
@@ -571,7 +571,7 @@ func TestDiagnosticsScrollAndClamp(t *testing.T) {
 		})
 	}
 	model := loadedModel(t, backend, 80, 24)
-	model = press(t, model, key('7', "7"))
+	model = press(t, model, key('4', "4"))
 	if model.diagScroll != 0 {
 		t.Fatalf("initial scroll = %d", model.diagScroll)
 	}
@@ -601,7 +601,7 @@ func TestTooSmall(t *testing.T) {
 
 func TestSettingsShowsPaths(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
-	model = press(t, model, key('8', "8"))
+	model = press(t, model, key('5', "5"))
 	view := model.View().Content
 	if !strings.Contains(view, "/home/u/.config/hilt/config.json") || !strings.Contains(view, "read-only") {
 		t.Errorf("settings missing paths: %q", view)
@@ -664,7 +664,7 @@ func findMessage[T any](t *testing.T, messages []tea.Msg) T {
 
 func TestSDKListFocusAndSelection(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	if model.sdkFocus != focusSDKs {
 		t.Fatalf("focus = %v, want SDKs", model.sdkFocus)
 	}
@@ -688,7 +688,7 @@ func TestSDKListFocusAndSelection(t *testing.T) {
 
 func TestSDKTablesShowColumns(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	plain := ansi.Strip(model.View().Content)
 	for _, want := range []string{"SELECTED TOOLCHAIN", "VERSION", "SOURCE", "LOCATION", "FRAMEWORK", "managed"} {
 		if !strings.Contains(plain, want) {
@@ -710,7 +710,7 @@ func TestDashboardFooterShowsInstallHint(t *testing.T) {
 
 func TestSDKFooterKeepsQuitHint(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 80, 24)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	footer := lines[len(lines)-1]
 	if !strings.Contains(footer, "? help") || !strings.Contains(footer, "q quit") {
@@ -729,7 +729,7 @@ func TestSDKInstallFlow(t *testing.T) {
 		SystemCopy: true,
 	}
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model = press(t, model, key('i', "i"))
 	if model.prompt != promptInstallSDK {
 		t.Fatalf("prompt = %v, want SDK install", model.prompt)
@@ -784,7 +784,7 @@ func TestSDKAvailablePickerHidesInstalledAndSelects(t *testing.T) {
 		{Version: "8.0.400", Channel: "8.0", SupportPhase: "active", ReleaseType: "lts", Latest: true},
 	}
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	updated, command := model.Update(key('i', "i"))
 	model = updated.(Model)
 	if command == nil {
@@ -832,7 +832,7 @@ func TestSDKAvailablePickerKeepsTypedInput(t *testing.T) {
 		{Version: "10.0.200", Channel: "10.0", Latest: true},
 	}
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	updated, command := model.Update(key('i', "i"))
 	model = updated.(Model)
 	model = applyMessages(t, model, runCmd(t, command))
@@ -857,7 +857,7 @@ func TestSDKAvailablePickerAllInstalled(t *testing.T) {
 		{Version: "9.0.300", Channel: "9.0", Latest: true},
 	}
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	updated, command := model.Update(key('i', "i"))
 	model = updated.(Model)
 	model = applyMessages(t, model, runCmd(t, command))
@@ -879,7 +879,7 @@ func TestSDKAvailablePickerError(t *testing.T) {
 	backend := newFakeBackend()
 	backend.availableErr = errors.New("release metadata unavailable")
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	updated, command := model.Update(key('i', "i"))
 	model = updated.(Model)
 	model = applyMessages(t, model, runCmd(t, command))
@@ -894,7 +894,7 @@ func TestSDKAvailablePickerError(t *testing.T) {
 
 func TestOperationDownloadProgressBar(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model.startOperation("Installing managed SDK 10.0.100", func() {})
 	model = apply(t, model, progressMsg{downloaded: 5 << 20, total: 10 << 20, hasProgress: true})
 	view := ansi.Strip(model.View().Content)
@@ -907,7 +907,7 @@ func TestOperationDownloadProgressBar(t *testing.T) {
 
 func TestManagementPanelsAndStatusBadges(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 
 	prompt := model
 	prompt.startSDKPrompt()
@@ -947,7 +947,7 @@ func TestManagementPanelsAndStatusBadges(t *testing.T) {
 func TestRuntimeInstallPromptIncludesFramework(t *testing.T) {
 	backend := newFakeBackend()
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
 	model = press(t, model, key('i', "i"))
 	if model.prompt != promptInstallRuntime {
@@ -982,7 +982,7 @@ func TestRuntimeInstallPromptIncludesFramework(t *testing.T) {
 func TestSystemAndUnownedSDKRemovalRefused(t *testing.T) {
 	backend := newFakeBackend()
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model = press(t, model, key('x', "x"))
 	if model.confirm != confirmNone {
 		t.Fatal("system SDK should not open a removal confirmation")
@@ -1009,7 +1009,7 @@ func TestOwnedSDKRemovalConfirms(t *testing.T) {
 	backend.inventory.SDKs[1].Owned = true
 	backend.inventory.SDKs[1].Provenance = dotnet.ProvenanceOwned
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model = press(t, model, key('j', "j"))
 	model = press(t, model, key('x', "x"))
 	if model.confirm != confirmRemoveSDK {
@@ -1034,7 +1034,7 @@ func TestUpdateCheckAndApply(t *testing.T) {
 	backend.sdkUpdates = []install.Update{{Version: "9.0.300", LatestVersion: "9.0.404", UpdateAvailable: true}}
 	backend.updateResult = install.UpdateResult{From: "9.0.300", To: "9.0.404", UpdateAvailable: true, Installed: true, OldRetained: true}
 	model := loadedModel(t, backend, 140, 40)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model = press(t, model, key('j', "j"))
 	updated, command := model.Update(key('u', "u"))
 	model = updated.(Model)
@@ -1072,7 +1072,7 @@ func TestCancelInstallOperation(t *testing.T) {
 	backend := newFakeBackend()
 	backend.installStarted = make(chan struct{})
 	model := loadedModel(t, backend, 120, 36)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model = press(t, model, key('i', "i"))
 	model = typeText(t, model, "10.0.112")
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -1104,7 +1104,7 @@ func TestRuntimeUpdateApplyUsesSelectedFramework(t *testing.T) {
 	backend := newFakeBackend()
 	backend.runtimeUpdates = []install.Update{{Version: "10.0.12", LatestVersion: "10.0.13", UpdateAvailable: true}}
 	model := loadedModel(t, backend, 140, 40)
-	model = press(t, model, key('2', "2"))
+	model = press(t, model, key('3', "3"))
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
 	model = press(t, model, key('j', "j"))
 	selected, ok := model.selectedRuntime()
@@ -1177,7 +1177,7 @@ func projectFixture() projects.Result {
 func openProjects(t *testing.T, backend fakeBackend, width, height int) Model {
 	t.Helper()
 	model := loadedModel(t, backend, width, height)
-	updated, command := model.Update(key('3', "3"))
+	updated, command := model.Update(key('2', "2"))
 	model = updated.(Model)
 	if command == nil {
 		t.Fatal("opening projects returned no scan command")
@@ -1309,8 +1309,8 @@ func TestStatusLineAppearsOnEveryScreen(t *testing.T) {
 	}{
 		{name: "dashboard", model: loadedModel(t, newFakeBackend(), 100, 30)},
 		{name: "projects", model: openProjects(t, projectsBackend, 100, 30)},
-		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 100, 30), key('7', "7"))},
-		{name: "settings", model: press(t, loadedModel(t, newFakeBackend(), 100, 30), key('8', "8"))},
+		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 100, 30), key('4', "4"))},
+		{name: "settings", model: press(t, loadedModel(t, newFakeBackend(), 100, 30), key('5', "5"))},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1482,8 +1482,8 @@ func TestFooterMatchesKeymap(t *testing.T) {
 		{name: "runtime prompt", model: runtimePrompt, context: ctxPromptRuntime},
 		{name: "confirmation", model: confirmation, context: ctxConfirm},
 		{name: "dashboard", model: loadedModel(t, newFakeBackend(), 160, 40), context: ctxDashboard},
-		{name: "sdks", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('2', "2")), context: ctxSDKs},
-		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('7', "7")), context: ctxDiagnostics},
+		{name: "sdks", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('3', "3")), context: ctxSDKs},
+		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('4', "4")), context: ctxDiagnostics},
 		{name: "projects loading", model: projectsLoading, context: ctxProjectsLoading},
 		{name: "projects", model: projects, context: ctxProjects},
 		{name: "settings", model: settings, context: ctxSettings},
@@ -1541,5 +1541,25 @@ func TestQuitDuringUpdateCheckRequiresConfirmation(t *testing.T) {
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if model.quitConfirm || !model.loadingUpdates {
 		t.Fatalf("esc should stay in the update check: confirm=%v loading=%v", model.quitConfirm, model.loadingUpdates)
+	}
+}
+
+func TestTopLevelNavigationHasFiveDestinations(t *testing.T) {
+	want := []string{"Home", "Projects", "SDKs", "Diagnostics", "Settings"}
+	if len(screens) != len(want) {
+		t.Fatalf("screens = %d, want %d", len(screens), len(want))
+	}
+	for index, short := range want {
+		if screens[index].short != short {
+			t.Errorf("screen %d = %q, want %q", index+1, screens[index].short, short)
+		}
+	}
+
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	for index := range want {
+		model = press(t, model, key(rune('1'+index), string(rune('1'+index))))
+		if model.screen != Screen(index) {
+			t.Errorf("key %d selected screen %v, want %v", index+1, model.screen, Screen(index))
+		}
 	}
 }

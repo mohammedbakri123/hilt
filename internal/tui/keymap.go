@@ -107,7 +107,7 @@ var keymap = map[keyContext]keyContextSpec{
 	}},
 	ctxDashboard: {CompactWidth: 100, Bindings: []keyBinding{
 		{Key: "↑/↓", Action: actionMove, Label: "sections", Compact: true},
-		{Key: "1-8", Action: actionJump, Label: "jump"},
+		{Key: "1-5", Action: actionJump, Label: "jump"},
 		{Key: "i", Action: actionInstall, Label: "install SDK", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "refresh", Compact: true},
 		{Key: "d", Action: actionDoctor, Label: "doctor"},
@@ -146,7 +146,7 @@ var keymap = map[keyContext]keyContextSpec{
 	}},
 	ctxSettings: {CompactWidth: 72, Bindings: []keyBinding{
 		{Key: "↑/↓", Action: actionMove, Label: "sections", Compact: true},
-		{Key: "1-8", Action: actionJump, Label: "jump"},
+		{Key: "1-5", Action: actionJump, Label: "jump"},
 		{Key: "r", Action: actionRefresh, Label: "refresh", Compact: true},
 		{Key: "d", Action: actionDoctor, Label: "doctor"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
@@ -158,7 +158,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
 	ctxHelpNavigation: {Bindings: []keyBinding{
-		{Key: "1-8", Action: actionJump, Label: "jump", Help: "jump to a section"},
+		{Key: "1-5", Action: actionJump, Label: "jump", Help: "jump to a section"},
 		{Key: "tab", Action: actionNavigate, Label: "switch", Help: "switch list or section"},
 		{Key: "↑/↓  j/k", Action: actionMove, Label: "move", Help: "move selection or section"},
 		{Key: "enter", Action: actionConfirm, Label: "open", Help: "open section / confirm prompt"},

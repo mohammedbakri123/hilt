@@ -11,7 +11,7 @@ discovery are implemented.
 
 Phase 1 provides:
 
-- Full-screen TUI with Dashboard, SDKs & Runtimes, Diagnostics, and Settings.
+- Full-screen TUI with Home, Projects, SDKs & Runtimes, Diagnostics, and Settings.
 - .NET host discovery from `DOTNET_ROOT`, `PATH`, known roots, and the managed
   root.
 - SDK and shared-runtime inventory with provenance, ownership, and selection.
@@ -55,8 +55,8 @@ Phase 3 project discovery provides:
   selected project across refreshes, and shows declared metadata.
 
 Not implemented: MSBuild evaluation, builds, run/test execution, `global.json`
-writes, NuGet operations, and templates. The corresponding screens say so
-explicitly. See [docs/roadmap.md](docs/roadmap.md).
+writes, NuGet operations, and templates. Empty project tabs state each gap
+explicitly once tabs exist. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 

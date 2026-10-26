@@ -321,22 +321,13 @@ func (m Model) screenLines(width int) []string {
 		return m.settingsLines(width)
 	case ScreenProjects:
 		return m.projectLines(width)
-	case ScreenPackages:
-		return placeholderLines("NuGet Packages", 4,
-			"List, search, add, update, and remove NuGet packages for a selected project.", width)
-	case ScreenCreate:
-		return placeholderLines("Create Project", 5,
-			"Generate projects from installed templates with validated names and destinations.", width)
-	case ScreenTemplates:
-		return placeholderLines("Templates & Architectures", 5,
-			"Create Clean Architecture and Vertical Slice solutions with configurable references.", width)
 	default:
 		return []string{"Unknown screen"}
 	}
 }
 
 func (m Model) dashboardLines(width int) []string {
-	lines := sectionHeader("Dashboard", width)
+	lines := sectionHeader("Home", width)
 
 	if m.backend == nil {
 		return append(lines, "No backend configured.")
@@ -1044,23 +1035,6 @@ func (m Model) warnings() []string {
 		warnings = append(warnings, m.selectionErr.Error())
 	}
 	return dedupeStrings(warnings)
-}
-
-func placeholderLines(title string, phase int, description string, width int) []string {
-	lines := sectionHeader(title, width)
-	content := []string{
-		styleWarning.Render("Not implemented."),
-		"",
-	}
-	for _, line := range wrap(description, width-6) {
-		content = append(content, line)
-	}
-	content = append(content, "")
-	for _, line := range wrap(fmt.Sprintf("Planned for Phase %d. This screen does not modify files or run commands yet.", phase), width-6) {
-		content = append(content, styleMuted.Render(line))
-	}
-	lines = append(lines, calloutBox("PLANNED", content, width)...)
-	return lines
 }
 
 func sectionHeader(title string, width int) []string {

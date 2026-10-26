@@ -52,11 +52,8 @@ type Screen int
 
 const (
 	ScreenDashboard Screen = iota
-	ScreenSDKs
 	ScreenProjects
-	ScreenPackages
-	ScreenCreate
-	ScreenTemplates
+	ScreenSDKs
 	ScreenDiagnostics
 	ScreenSettings
 )
@@ -67,12 +64,9 @@ type screenInfo struct {
 }
 
 var screens = []screenInfo{
-	{"Dashboard", "Dashboard"},
-	{"SDKs & Runtimes", "SDKs"},
+	{"Home", "Home"},
 	{"Projects & Solutions", "Projects"},
-	{"NuGet Packages", "NuGet"},
-	{"Create Project", "Create"},
-	{"Templates & Architectures", "Templates"},
+	{"SDKs & Runtimes", "SDKs"},
 	{"Diagnostics", "Diagnostics"},
 	{"Settings", "Settings"},
 }
@@ -490,7 +484,7 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.setStatus("", false)
 		return m, nil
-	case "1", "2", "3", "4", "5", "6", "7", "8":
+	case "1", "2", "3", "4", "5":
 		index := int(key[0] - '1')
 		command := m.navigate(Screen(index))
 		return m, command
