@@ -211,95 +211,71 @@ func (m Model) renderSidebar(height int) string {
 	return strings.Join(window, "\n")
 }
 
-type keyHint struct {
-	key   string
-	label string
+func (m Model) footerContext() keyContext {
+	switch {
+	case m.quitConfirm:
+		return ctxQuitConfirm
+	case m.showHelp:
+		return ctxHelp
+	case m.operationRunning:
+		return ctxOperation
+	case m.loadingUpdates:
+		return ctxUpdates
+	case m.prompt == promptInstallSDK:
+		if m.promptFocusInput {
+			return ctxPromptSDKInput
+		}
+		return ctxPromptSDKList
+	case m.prompt != promptNone:
+		return ctxPromptRuntime
+	case m.confirm != confirmNone:
+		return ctxConfirm
+	case m.screen == ScreenDashboard:
+		return ctxDashboard
+	case m.screen == ScreenSDKs:
+		return ctxSDKs
+	case m.screen == ScreenDiagnostics:
+		return ctxDiagnostics
+	case m.screen == ScreenProjects:
+		if m.projectsLoading {
+			return ctxProjectsLoading
+		}
+		return ctxProjects
+	}
+	return ctxSettings
 }
 
 func (m Model) renderFooter(width int) string {
-	var hints []keyHint
-	switch {
-	case m.quitConfirm:
-		hints = []keyHint{{"y/enter", "quit"}, {"esc/n", "stay"}}
-	case m.showHelp:
-		hints = []keyHint{{"esc", "close help"}, {"q", "quit"}}
-	case m.operationRunning:
-		hints = []keyHint{{"esc", "cancel operation"}, {"q", "quit"}}
-	case m.loadingUpdates:
-		hints = []keyHint{{"esc", "cancel update check"}, {"q", "quit"}}
-	case m.prompt == promptInstallSDK:
-		if m.promptFocusInput {
-			hints = []keyHint{{"tab", "select"}, {"enter", "install"}, {"esc", "cancel"}}
-		} else {
-			hints = []keyHint{{"↑/↓", "select"}, {"enter", "install"}, {"tab", "type"}, {"esc", "cancel"}}
-		}
-	case m.prompt != promptNone:
-		hints = []keyHint{{"enter", "resolve"}, {"←/→", "framework"}, {"esc", "cancel"}}
-	case m.confirm != confirmNone:
-		hints = []keyHint{{"enter/y", "confirm"}, {"esc/n", "cancel"}}
-	case m.screen == ScreenDashboard:
-		hints = []keyHint{{"↑/↓", "sections"}, {"1-8", "jump"}, {"i", "install SDK"}, {"r", "refresh"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
-		if width < 100 {
-			hints = []keyHint{{"↑/↓", "sections"}, {"i", "install SDK"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
-		}
-	case m.screen == ScreenSDKs:
-		hints = []keyHint{{"tab", "switch list"}, {"↑/↓", "select"}, {"i", "install"}, {"x", "remove"}, {"u", "updates"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
-		if width < 110 {
-			hints = []keyHint{{"tab", "list"}, {"i", "install"}, {"x", "remove"}, {"u", "updates"}, {"?", "help"}, {"q", "quit"}}
-		}
-	case m.screen == ScreenDiagnostics:
-		hints = []keyHint{{"↑/↓", "sections"}, {"pgup/pgdn", "scroll"}, {"r", "re-run"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
-		if width < 100 {
-			hints = []keyHint{{"↑/↓", "sections"}, {"r", "re-run"}, {"?", "help"}, {"q", "quit"}}
-		}
-	case m.screen == ScreenProjects:
-		if m.projectsLoading {
-			hints = []keyHint{{"esc", "cancel scan"}, {"?", "help"}, {"q", "quit"}}
-		} else {
-			hints = []keyHint{{"↑/↓", "select"}, {"r", "rescan"}, {"pgup/pgdn", "scroll"}, {"?", "help"}, {"q", "quit"}}
-			if width < 90 {
-				hints = []keyHint{{"↑/↓", "select"}, {"r", "rescan"}, {"?", "help"}, {"q", "quit"}}
-			}
-		}
-	default:
-		hints = []keyHint{{"↑/↓", "sections"}, {"1-8", "jump"}, {"r", "refresh"}, {"d", "doctor"}, {"?", "help"}, {"q", "quit"}}
-		if width < 72 {
-			hints = []keyHint{{"↑/↓", "sections"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"}}
-		}
-	}
-
-	if width < 56 && len(hints) > 3 {
-		hints = []keyHint{{"↑/↓", "navigate"}, {"?", "help"}, {"q", "quit"}}
-	}
+	hints := footerBindings(m.footerContext(), width)
 	parts := make([]string, 0, len(hints))
 	for _, hint := range hints {
-		parts = append(parts, styleKey.Render(hint.key)+" "+styleMuted.Render(hint.label))
+		parts = append(parts, styleKey.Render(hint.Key)+" "+styleMuted.Render(hint.Label))
 	}
-	return fitLine(" "+strings.Join(parts, styleFaint.Render("  ·  ")), width)
+	return fitLine(" "+strings.Join(parts, "  "), width)
 }
 
 func (m Model) renderHelp(width, height int) string {
-	content := []string{
-		styleTitle.Render("Keyboard shortcuts"),
-		"",
-		styleLabel.Render("NAVIGATION"),
-		helpLine("1-8", "jump to a section"),
-		helpLine("tab", "switch list or section"),
-		helpLine("↑/↓  j/k", "move selection or section"),
-		helpLine("enter", "open section / confirm prompt"),
-		"",
-		styleLabel.Render("MANAGED .NET"),
-		helpLine("i", "install SDK or runtime"),
-		helpLine("x", "remove a managed item"),
-		helpLine("u", "check or apply updates"),
-		helpLine("esc", "close prompt / cancel operation"),
-		"",
-		styleLabel.Render("VIEW"),
-		helpLine("r", "refresh inventory"),
-		helpLine("d", "run diagnostics"),
-		helpLine("pgup/pgdn", "scroll content"),
-		helpLine("? / esc", "close help"),
-		helpLine("q  ctrl+c", "quit Hilt"),
+	content := []string{styleTitle.Render("Keyboard shortcuts"), ""}
+	sections := []struct {
+		title   string
+		context keyContext
+	}{
+		{title: "NAVIGATION", context: ctxHelpNavigation},
+		{title: "MANAGED .NET", context: ctxHelpManaged},
+		{title: "VIEW", context: ctxHelpView},
+	}
+	for index, section := range sections {
+		if index > 0 {
+			content = append(content, "")
+		}
+		content = append(content, styleLabel.Render(section.title))
+		for _, binding := range bindingsFor(section.context) {
+			help := binding.Help
+			if help == "" {
+				help = binding.Label
+			}
+			content = append(content, helpLine(binding.Key, help))
+		}
 	}
 	box := styleHelpBox.Render(strings.Join(content, "\n"))
 	if lipgloss.Width(box) > width || lipgloss.Height(box) > height {

@@ -1389,3 +1389,134 @@ func TestEscapeCancelsDuringOperation(t *testing.T) {
 		t.Fatal("esc must not open the quit confirmation")
 	}
 }
+
+func TestKeymapHasNoConflicts(t *testing.T) {
+	if conflicts := keymapConflicts(keymap); len(conflicts) > 0 {
+		t.Fatalf("keymap conflicts: %v", conflicts)
+	}
+}
+
+func TestKeymapDetectsDuplicateBindings(t *testing.T) {
+	conflicted := map[keyContext]keyContextSpec{
+		ctxDashboard: {Bindings: []keyBinding{
+			{Key: "q", Action: actionQuit, Label: "quit"},
+			{Key: "q", Action: actionHelp, Label: "help"},
+		}},
+	}
+	conflicts := keymapConflicts(conflicted)
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts = %v, want one duplicate", conflicts)
+	}
+	if !strings.Contains(conflicts[0], `duplicate key "q"`) {
+		t.Fatalf("unexpected conflict: %q", conflicts[0])
+	}
+}
+
+func TestKeymapActions(t *testing.T) {
+	tests := []struct {
+		context keyContext
+		key     string
+		want    keyAction
+	}{
+		{context: ctxQuitConfirm, key: "y/enter", want: actionQuit},
+		{context: ctxOperation, key: "esc", want: actionCancelOperation},
+		{context: ctxSDKs, key: "u", want: actionUpdates},
+		{context: ctxProjectsLoading, key: "esc", want: actionCancelScan},
+	}
+	for _, test := range tests {
+		got, ok := actionFor(test.context, test.key)
+		if !ok || got != test.want {
+			t.Errorf("%s/%s = %q, %v; want %q", test.context, test.key, got, ok, test.want)
+		}
+	}
+	if _, ok := actionFor(ctxDashboard, "z"); ok {
+		t.Error("unknown key should not resolve")
+	}
+}
+
+func TestFooterMatchesKeymap(t *testing.T) {
+	operation := loadedModel(t, newFakeBackend(), 160, 40)
+	operation.startOperation("Installing managed SDK 9.0.300", func() {})
+
+	sdkInput := loadedModel(t, newFakeBackend(), 160, 40)
+	sdkInput.prompt = promptInstallSDK
+	sdkInput.promptFocusInput = true
+
+	sdkList := loadedModel(t, newFakeBackend(), 160, 40)
+	sdkList.prompt = promptInstallSDK
+	sdkList.promptFocusInput = false
+
+	runtimePrompt := loadedModel(t, newFakeBackend(), 160, 40)
+	runtimePrompt.prompt = promptInstallRuntime
+
+	confirmation := loadedModel(t, newFakeBackend(), 160, 40)
+	confirmation.confirm = confirmInstallSDK
+
+	quitConfirm := loadedModel(t, newFakeBackend(), 160, 40)
+	quitConfirm.quitConfirm = true
+
+	updates := loadedModel(t, newFakeBackend(), 160, 40)
+	updates.loadingUpdates = true
+
+	projectsLoading := loadedModel(t, newFakeBackend(), 160, 40)
+	projectsLoading.screen = ScreenProjects
+	projectsLoading.projectsLoading = true
+
+	settings := loadedModel(t, newFakeBackend(), 160, 40)
+	settings.screen = ScreenSettings
+
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	projects := openProjects(t, backend, 160, 40)
+
+	tests := []struct {
+		name    string
+		model   Model
+		context keyContext
+	}{
+		{name: "quit confirm", model: quitConfirm, context: ctxQuitConfirm},
+		{name: "operation", model: operation, context: ctxOperation},
+		{name: "updates", model: updates, context: ctxUpdates},
+		{name: "sdk input", model: sdkInput, context: ctxPromptSDKInput},
+		{name: "sdk list", model: sdkList, context: ctxPromptSDKList},
+		{name: "runtime prompt", model: runtimePrompt, context: ctxPromptRuntime},
+		{name: "confirmation", model: confirmation, context: ctxConfirm},
+		{name: "dashboard", model: loadedModel(t, newFakeBackend(), 160, 40), context: ctxDashboard},
+		{name: "sdks", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('2', "2")), context: ctxSDKs},
+		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('7', "7")), context: ctxDiagnostics},
+		{name: "projects loading", model: projectsLoading, context: ctxProjectsLoading},
+		{name: "projects", model: projects, context: ctxProjects},
+		{name: "settings", model: settings, context: ctxSettings},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if context := test.model.footerContext(); context != test.context {
+				t.Fatalf("footer context = %s, want %s", context, test.context)
+			}
+			plain := ansi.Strip(test.model.View().Content)
+			lines := strings.Split(plain, "\n")
+			footer := lines[len(lines)-1]
+			for _, binding := range bindingsFor(test.context) {
+				if !strings.Contains(footer, binding.Key+" "+binding.Label) {
+					t.Errorf("footer missing %q: %q", binding.Key+" "+binding.Label, footer)
+				}
+			}
+		})
+	}
+}
+
+func TestHelpMatchesKeymap(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	model = press(t, model, key('?', "?"))
+	plain := ansi.Strip(model.View().Content)
+	for _, context := range []keyContext{ctxHelpNavigation, ctxHelpManaged, ctxHelpView} {
+		for _, binding := range bindingsFor(context) {
+			if !strings.Contains(plain, binding.Key) {
+				t.Errorf("help missing key %q", binding.Key)
+			}
+			if binding.Help != "" && !strings.Contains(plain, binding.Help) {
+				t.Errorf("help missing description %q", binding.Help)
+			}
+		}
+	}
+}
