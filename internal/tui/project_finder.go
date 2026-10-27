@@ -338,6 +338,7 @@ func (m *Model) openProjectFromFinder() tea.Cmd {
 	m.projectFinderLoading = false
 	m.projectFinderOrigin = ""
 	if entry.hasProject {
+		m.adoptProject(entry.project)
 		m.restoreProjectSelection(entry.project.Path)
 		return m.openProjectDetail(entry.project)
 	}

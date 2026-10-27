@@ -537,10 +537,20 @@ func (m Model) maxFocusedScroll() int {
 
 func (m Model) openProjectCmd(project projects.Project) tea.Cmd {
 	workspace := m.workspaceFor(project.Path)
+	backend := m.backend
+	pinExternal := m.projectIsExternal(project.Path)
 	return func() tea.Msg {
+		if backend == nil {
+			return projectOpenedMsg{project: project, err: errors.New("no backend configured")}
+		}
+		if pinExternal {
+			if err := backend.PinExternalProject(project.Path); err != nil {
+				return projectOpenedMsg{project: project, err: err}
+			}
+		}
 		return projectOpenedMsg{
 			project: project,
-			err:     m.backend.RecordProjectOpen(project.Path, workspace),
+			err:     backend.RecordProjectOpen(project.Path, workspace),
 		}
 	}
 }
@@ -586,12 +596,42 @@ func (m Model) workspaceFor(projectPath string) string {
 }
 
 func (m Model) selectedProject() (projects.Project, bool) {
+	if m.projectDetailOpen && !m.projectDetailWorkspace {
+		if project, ok := m.projectDetailProject(); ok {
+			return project, true
+		}
+	}
 	projectsList := m.filteredProjects()
 	if len(projectsList) == 0 {
 		return projects.Project{}, false
 	}
 	index := clampIndex(m.projectCursor, len(projectsList))
 	return projectsList[index], true
+}
+
+func (m *Model) adoptProject(project projects.Project) {
+	if m.projectResult == nil {
+		result := projects.Result{Root: m.projectWorkspaceRoot()}
+		m.projectResult = &result
+	}
+	for _, existing := range m.projectResult.Projects {
+		if existing.Path == project.Path {
+			return
+		}
+	}
+	m.projectResult.Projects = append(m.projectResult.Projects, project)
+	for _, workspace := range m.projectResult.Workspaces {
+		if workspace.Path == project.Path {
+			return
+		}
+	}
+	m.projectResult.Workspaces = append(m.projectResult.Workspaces, projects.Workspace{
+		Path:         project.Path,
+		Name:         project.Name,
+		Directory:    project.Directory,
+		Kind:         projects.KindProject,
+		ProjectPaths: []string{project.Path},
+	})
 }
 
 func (m *Model) restoreProjectSelection(path string) {

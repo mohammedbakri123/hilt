@@ -1522,6 +1522,41 @@ func TestProjectFinderMouseSelectsAndDoubleClickOpens(t *testing.T) {
 	}
 }
 
+func TestExternalFinderProjectCanRunAndPersistsSource(t *testing.T) {
+	backend := newFakeBackend()
+	backend.paths.ProjectsRoot = "/work"
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+
+	project := projects.Project{
+		Path:             "/home/me/src/Orders/Orders.csproj",
+		Name:             "Orders",
+		Directory:        "/home/me/src/Orders",
+		Kind:             projects.KindProject,
+		TargetFrameworks: []string{"net10.0"},
+	}
+	model.projectFiltering = true
+	model.projectFinderEntriesCache = []projectFinderEntry{{name: project.Name + ".csproj", path: project.Path, project: project, hasProject: true}}
+	model.projectFinderCursor = 0
+
+	command := model.openProjectFromFinder()
+	model = applyMessages(t, model, runCmd(t, command))
+	if !model.projectDetailOpen || model.projectDetailPath != project.Path {
+		t.Fatalf("detail = %v path = %q", model.projectDetailOpen, model.projectDetailPath)
+	}
+	if selected, ok := model.selectedProject(); !ok || selected.Path != project.Path {
+		t.Fatalf("selected project = %+v, want %q", selected, project.Path)
+	}
+	if len(backend.State().PinnedExternalProjects) != 1 || backend.State().PinnedExternalProjects[0] != project.Path {
+		t.Fatalf("pinned sources = %v", backend.State().PinnedExternalProjects)
+	}
+	updated, buildCommand := model.Update(key('b', "b"))
+	model = updated.(Model)
+	if buildCommand == nil {
+		t.Fatal("b should build the project opened from the external finder")
+	}
+}
+
 func TestProjectFinderFitsLayouts(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{40, 12}, {60, 20}, {80, 24}, {160, 48}} {
 		backend := newFakeBackend()
