@@ -54,6 +54,7 @@ type Backend interface {
 	SetDefaultProjectDir(path string) error
 	BuildProject(ctx context.Context, request execution.BuildRequest, stdout, stderr io.Writer) (execution.Result, error)
 	RecordBuildTarget(target state.BuildTarget) error
+	CreateProjects(ctx context.Context, plan projects.CreatePlan, stdout, stderr io.Writer) error
 }
 
 // Screen identifies a main section.
@@ -106,6 +107,26 @@ type projectOpenedMsg struct {
 type projectImportMsg struct {
 	path string
 	err  error
+}
+
+type createStage int
+
+const (
+	createStageTemplate createStage = iota
+	createStageName
+	createStageDestination
+	createStageSolution
+)
+
+type projectCreateWizard struct {
+	open           bool
+	stage          createStage
+	templateCursor int
+	name           string
+	destination    string
+	solutionPath   string
+	solutionMode   int // 0 independent, 1 new solution, 2 existing solution
+	errorMessage   string
 }
 
 type projectsMsg struct {
@@ -163,6 +184,7 @@ type Model struct {
 	pendingRemove      *removeTarget
 	pendingUpdate      *install.Update
 	pendingFramework   install.FrameworkFlavor
+	pendingCreatePlan  *projects.CreatePlan
 
 	operationRunning    bool
 	operationCancelling bool
@@ -189,6 +211,7 @@ type Model struct {
 	projectFiltering    bool
 	projectCancel       context.CancelFunc
 	projectRequest      int
+	createWizard        projectCreateWizard
 
 	rootPicker projectRootPicker
 
@@ -376,6 +399,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus(message.err.Error(), true)
 			return m, nil
 		}
+		if message.kind == opCreateProjects {
+			m.setStatus("Project creation completed.", false)
+			return m, m.startProjectsScan()
+		}
 		m.updates = nil
 		m.runtimeUpdates = nil
 		m.updatesLoaded = false
@@ -544,6 +571,10 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleProjectFilterKey(message)
 	}
 
+	if m.createWizard.open {
+		return m.handleProjectCreateKey(message)
+	}
+
 	if m.prompt != promptNone {
 		return m.handlePromptKey(message)
 	}
@@ -679,6 +710,9 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.promptInput = ""
 			m.promptFocusInput = true
 			m.setStatus("", false)
+			return m, nil
+		case "n":
+			m.startProjectCreateWizard()
 			return m, nil
 		case "e":
 			m.toggleSelectedProjectWorkspace()

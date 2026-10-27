@@ -428,6 +428,8 @@ func confirmTitle(kind confirmKind) string {
 		return "UPDATE SDK"
 	case confirmUpdateRuntime:
 		return "UPDATE RUNTIME"
+	case confirmCreateProjects:
+		return "CREATE PROJECT"
 	default:
 		return "ACTION"
 	}

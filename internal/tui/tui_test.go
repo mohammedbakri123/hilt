@@ -192,6 +192,14 @@ func (f fakeBackend) RecordBuildTarget(target state.BuildTarget) error {
 	return nil
 }
 
+func (f fakeBackend) CreateProjects(_ context.Context, _ projects.CreatePlan, stdout, _ io.Writer) error {
+	f.record("create-projects")
+	if stdout != nil {
+		_, _ = io.WriteString(stdout, "created project\n")
+	}
+	return nil
+}
+
 func (f fakeBackend) RecordProjectOpen(projectPath, workspacePath string) error {
 	if f.stateErr != nil {
 		return f.stateErr
@@ -1442,6 +1450,37 @@ func TestProjectsTreeCanCollapseAndExpandWorkspace(t *testing.T) {
 	expanded := ansi.Strip(model.View().Content)
 	if !strings.Contains(expanded, "Shop.Tests") {
 		t.Fatalf("expanded workspace is missing child project:\n%s", expanded)
+	}
+}
+
+func TestProjectsCreateWizardBuildsNewSolutionPlan(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+
+	model = press(t, model, key('n', "n"))
+	if !model.createWizard.open {
+		t.Fatal("create wizard did not open")
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	for _, character := range "Orders" {
+		model = press(t, model, key(character, string(character)))
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if model.confirm != confirmCreateProjects || model.pendingCreatePlan == nil {
+		t.Fatalf("confirm = %v plan = %+v", model.confirm, model.pendingCreatePlan)
+	}
+	if model.pendingCreatePlan.Solution != "/work/Orders.sln" {
+		t.Fatalf("solution = %q", model.pendingCreatePlan.Solution)
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"CONFIRM CREATE PROJECT", "Orders.sln"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("creation preview missing %q:\n%s", want, plain)
+		}
 	}
 }
 

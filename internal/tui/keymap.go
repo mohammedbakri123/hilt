@@ -60,6 +60,7 @@ const (
 	ctxProjectSplit    keyContext = "project-split"
 	ctxProjectFilter   keyContext = "project-filter"
 	ctxProjectImport   keyContext = "project-import"
+	ctxProjectCreate   keyContext = "project-create"
 	ctxProjectRoot     keyContext = "project-root"
 	ctxSettings        keyContext = "settings"
 	ctxOutput          keyContext = "output"
@@ -157,13 +158,14 @@ var keymap = map[keyContext]keyContextSpec{
 	ctxProjects: {CompactWidth: 90, Bindings: []keyBinding{
 		{Key: "[/]", Action: actionNavigate, Label: "nav"},
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
-		{Key: "enter", Action: actionConfirm, Label: "open", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "o", Compact: true},
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
-		{Key: "/", Action: actionFilter, Label: "find", Compact: true},
+		{Key: "/", Action: actionFilter, Label: "f", Compact: true},
 		{Key: "p", Action: actionChooseRoot, Label: "root", Compact: true},
 		{Key: "a", Action: actionChooseRoot, Label: "+"},
 		{Key: "e", Action: actionToggleTree, Label: "tree"},
+		{Key: "n", Action: actionConfirm, Label: "new"},
 		{Key: ", .", Action: actionProjectTab, Label: "tab"},
 		{Key: "pgup/dn", Action: actionScroll, Label: "scroll"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
@@ -173,9 +175,9 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "[/]", Action: actionNavigate, Label: "nav"},
 		{Key: "tab", Action: actionSwitchFocus, Label: "focus", Compact: true},
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
-		{Key: "enter", Action: actionConfirm, Label: "open", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "o", Compact: true},
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
-		{Key: "/", Action: actionFilter, Label: "find", Compact: true},
+		{Key: "/", Action: actionFilter, Label: "f", Compact: true},
 		{Key: "p", Action: actionChooseRoot, Label: "root", Compact: true},
 		{Key: "e", Action: actionToggleTree, Label: "tree"},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},
@@ -209,6 +211,12 @@ var keymap = map[keyContext]keyContextSpec{
 	}},
 	ctxProjectImport: {Bindings: []keyBinding{
 		{Key: "enter", Action: actionConfirm, Label: "import", Compact: true},
+		{Key: "esc", Action: actionCancel, Label: "cancel", Compact: true},
+	}},
+	ctxProjectCreate: {Bindings: []keyBinding{
+		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "←/→", Action: actionSwitchFocus, Label: "mode", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "next", Compact: true},
 		{Key: "esc", Action: actionCancel, Label: "cancel", Compact: true},
 	}},
 	ctxProjectRoot: {CompactWidth: 86, Bindings: []keyBinding{

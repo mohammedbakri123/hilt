@@ -10,6 +10,7 @@ import (
 
 	"github.com/mohammedbakri123/hilt/internal/execution"
 	"github.com/mohammedbakri123/hilt/internal/process"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 	"github.com/mohammedbakri123/hilt/internal/state"
 )
 
@@ -113,5 +114,48 @@ func TestStateCopiesLastBuild(t *testing.T) {
 	got.LastBuild.ProjectPath = "mutated"
 	if app.State().LastBuild.ProjectPath != "/work/Shop/Shop.csproj" {
 		t.Fatal("State exposed a mutable LastBuild pointer")
+	}
+}
+
+type createRunner struct {
+	specs []process.Spec
+}
+
+func (r *createRunner) Run(context.Context, process.Spec) (process.Result, error) {
+	return process.Result{Started: true}, nil
+}
+
+func (r *createRunner) Stream(_ context.Context, spec process.Spec, _, _ io.Writer) (process.Result, error) {
+	r.specs = append(r.specs, spec)
+	return process.Result{Started: true}, nil
+}
+
+func TestCreateProjectsExecutesValidatedPlanInOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", filepath.Join(home, "hilt"))
+	app := New("test")
+	runner := &createRunner{}
+	app.runner = runner
+	plan, err := projects.PlanCreate(projects.CreateRequest{
+		TemplateID:       "webapi",
+		Name:             "Orders",
+		Destination:      filepath.Join(home, "src"),
+		ExistingSolution: filepath.Join(home, "Orders.sln"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.CreateProjects(context.Background(), plan, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.specs) != 2 {
+		t.Fatalf("executed specs = %d, want 2", len(runner.specs))
+	}
+	if runner.specs[0].Name != "dotnet" || runner.specs[0].Args[0] != "new" {
+		t.Fatalf("generator spec = %+v", runner.specs[0])
+	}
+	if runner.specs[1].Args[0] != "sln" || runner.specs[1].Args[2] != "add" {
+		t.Fatalf("solution spec = %+v", runner.specs[1])
 	}
 }

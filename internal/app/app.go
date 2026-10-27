@@ -268,6 +268,29 @@ func (a *App) BuildProject(ctx context.Context, request execution.BuildRequest, 
 	return execution.Builder{Runner: a.runner}.Build(ctx, request, stdout, stderr)
 }
 
+// CreateProjects executes a previously validated project creation plan without
+// invoking a shell. Each step is streamed in order so callers can show the
+// exact generator output and stop safely through context cancellation.
+func (a *App) CreateProjects(ctx context.Context, plan projects.CreatePlan, stdout, stderr io.Writer) error {
+	if len(plan.Steps) == 0 {
+		return fmt.Errorf("project creation plan has no steps")
+	}
+	for _, step := range plan.Steps {
+		if len(step.Command) == 0 || strings.TrimSpace(step.Command[0]) == "" {
+			return fmt.Errorf("project creation plan contains an empty command")
+		}
+		_, err := a.runner.Stream(ctx, process.Spec{
+			Name: step.Command[0],
+			Args: step.Command[1:],
+			Dir:  step.Dir,
+		}, stdout, stderr)
+		if err != nil {
+			return fmt.Errorf("create step %q: %w", strings.Join(step.Command, " "), err)
+		}
+	}
+	return nil
+}
+
 // PackageManager returns the detected package manager, if any.
 func (a *App) PackageManager() *platform.PackageManager { return a.packageManager }
 

@@ -86,7 +86,35 @@ func (m Model) render(width, height int) string {
 	if m.prompt == promptImportPath {
 		content = overlayCentered(content, m.renderProjectImportPrompt(width), width, height)
 	}
+	if m.createWizard.open {
+		content = overlayCentered(content, m.renderProjectCreateWizard(width), width, height)
+	}
+	if m.confirm != confirmNone && m.screen != ScreenSDKs {
+		content = overlayCentered(content, m.renderConfirmDialog(width), width, height)
+	}
 	return content
+}
+
+func (m Model) renderConfirmDialog(width int) string {
+	content := make([]string, 0, len(m.confirmSummary)+1)
+	for _, summary := range m.confirmSummary {
+		for index, line := range wrap(summary, width-12) {
+			if index == 0 {
+				content = append(content, styleAccent.Render("• ")+line)
+			} else {
+				content = append(content, "  "+line)
+			}
+		}
+	}
+	content = append(content, "", styleKey.Render("enter / y")+" confirm    "+styleKey.Render("esc / n")+" cancel")
+	boxWidth := width - 4
+	if boxWidth > 84 {
+		boxWidth = 84
+	}
+	if boxWidth < 28 {
+		boxWidth = 28
+	}
+	return styleCallout.Width(boxWidth).Render(strings.Join(append([]string{styleTitle.Render("CONFIRM " + confirmTitle(m.confirm))}, content...), "\n"))
 }
 
 func (m Model) renderProjectImportPrompt(width int) string {
@@ -173,6 +201,8 @@ func (m Model) footerContext() keyContext {
 		return ctxPromptSDKList
 	case m.prompt == promptImportPath:
 		return ctxProjectImport
+	case m.createWizard.open:
+		return ctxProjectCreate
 	case m.prompt != promptNone:
 		return ctxPromptRuntime
 	case m.confirm != confirmNone:

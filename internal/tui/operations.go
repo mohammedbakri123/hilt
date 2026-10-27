@@ -54,6 +54,7 @@ const (
 	confirmRemoveRuntime
 	confirmUpdateSDK
 	confirmUpdateRuntime
+	confirmCreateProjects
 )
 
 type operationKind string
@@ -65,6 +66,7 @@ const (
 	opRemoveRuntime    operationKind = "remove-runtime"
 	opUpdateSDK        operationKind = "update-sdk"
 	opUpdateRuntime    operationKind = "update-runtime"
+	opCreateProjects   operationKind = "create-projects"
 	updateCheckPeriod                = 45 * time.Second
 	availableSDKPeriod               = 180 * time.Second
 )
@@ -277,6 +279,7 @@ func (m *Model) clearConfirm() {
 	m.pendingRemove = nil
 	m.pendingUpdate = nil
 	m.pendingFramework = install.FrameworkAll
+	m.pendingCreatePlan = nil
 }
 
 func (m *Model) setStatus(message string, isError bool) {
@@ -591,6 +594,16 @@ func (m *Model) confirmAction() tea.Cmd {
 		ch := make(chan tea.Msg, 128)
 		m.progressCh = ch
 		return tea.Batch(m.updateRuntimeCmd(ctx, update, framework, ch), waitForProgress(ch))
+	case confirmCreateProjects:
+		if m.pendingCreatePlan == nil {
+			return nil
+		}
+		plan := *m.pendingCreatePlan
+		ctx, cancel := context.WithCancel(context.Background())
+		m.startOperation("Creating "+plan.Template.Name, cancel)
+		ch := make(chan tea.Msg, 128)
+		m.progressCh = ch
+		return tea.Batch(m.createProjectsCmd(ctx, plan, ch), waitForProgress(ch))
 	}
 	return nil
 }
