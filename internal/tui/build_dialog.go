@@ -32,7 +32,9 @@ func (m *Model) openBuildRunDialog() {
 
 	selectedPath := ""
 	if m.projectDetailWorkspace {
-		if workspace, ok := m.projectDetailSolution(); ok {
+		if project, present, ready := m.selectedSolutionMember(); present && ready {
+			selectedPath = project.Path
+		} else if workspace, ok := m.projectDetailSolution(); ok {
 			selectedPath = workspace.Path
 		}
 	} else if project, ok := m.selectedProject(); ok {

@@ -1533,6 +1533,11 @@ func TestSolutionMembersCanBeSelectedAndOpened(t *testing.T) {
 	if model.solutionMemberCursor != 1 {
 		t.Fatalf("member cursor = %d, want 1", model.solutionMemberCursor)
 	}
+	model = press(t, model, key('B', "B"))
+	if !model.buildRunDialog.open || model.currentBuildRunTarget().Path != "/work/tests/Shop.Tests/Shop.Tests.csproj" {
+		t.Fatalf("Build / Run target = %+v", model.currentBuildRunTarget())
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEsc})
 	plain := ansi.Strip(model.View().Content)
 	if !strings.Contains(plain, "> [ready] Shop.Tests") {
 		t.Fatalf("selected member not rendered:\n%s", plain)
