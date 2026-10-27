@@ -219,6 +219,9 @@ func (m Model) handleProjectsMsg(message projectsMsg) (tea.Model, tea.Cmd) {
 			previous = selected.Path
 		}
 	}
+	if previous == "" && m.backend != nil {
+		previous = m.backend.State().ActiveProject
+	}
 	result := message.result
 	m.projectResult = &result
 	m.projectsErr = nil

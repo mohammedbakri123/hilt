@@ -2311,6 +2311,18 @@ func TestProjectsEnterMarksActiveAndShowsRecent(t *testing.T) {
 	}
 }
 
+func TestProjectsRestoresPersistedActiveProject(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.state.ActiveProject = "/work/tests/Shop.Tests/Shop.Tests.csproj"
+
+	model := openProjects(t, backend, 100, 30)
+	selected, ok := model.selectedProject()
+	if !ok || selected.Path != backend.state.ActiveProject {
+		t.Fatalf("selected project = %+v, want persisted %q", selected, backend.state.ActiveProject)
+	}
+}
+
 func TestProjectsEnterReportsStateErrors(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
