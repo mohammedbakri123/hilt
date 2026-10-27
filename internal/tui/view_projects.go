@@ -359,7 +359,7 @@ func (m Model) projectTabBar() string {
 		}
 		parts = append(parts, styleMuted.Render(tab.label))
 	}
-	return "  " + strings.Join(parts, "  ")
+	return "  " + strings.Join(parts, "  ") + "  " + styleFaint.Render("· enter/double-click opens")
 }
 
 func (m Model) projectTabContent(project projects.Project, width int) []string {

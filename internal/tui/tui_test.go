@@ -1436,6 +1436,28 @@ func TestProjectsMouseSelectsRowsAndTabs(t *testing.T) {
 	}
 }
 
+func TestProjectsMouseDoubleClickOpensProject(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 160, 30)
+	click := tea.MouseClickMsg{X: 30, Y: 12, Button: tea.MouseLeft}
+
+	updated, command := model.Update(click)
+	model = updated.(Model)
+	if command != nil {
+		t.Fatal("first click should select without opening")
+	}
+	updated, command = model.Update(click)
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("second click should open the selected project")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if got := backend.State().ActiveProject; got != "/work/tests/Shop.Tests/Shop.Tests.csproj" {
+		t.Fatalf("active project = %q", got)
+	}
+}
+
 func TestViewEnablesCellMouseMode(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
 	if got := model.View().MouseMode; got != tea.MouseModeCellMotion {

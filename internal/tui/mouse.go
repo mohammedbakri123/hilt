@@ -2,9 +2,12 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 const headerLineCount = 2
@@ -87,6 +90,7 @@ func (m Model) handleProjectMouseClick(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 		}
 		line := mouse.Y - m.projectPanelTop() - 2 + m.projectListScroll
 		if projectIndex, ok := m.projectListProjectAt(line); ok && projectIndex >= 0 {
+			project := m.filteredProjects()[projectIndex]
 			m.projectCursor = projectIndex
 			m.projectDetailScroll = 0
 			m.projectFocus = projectFocusList
@@ -94,7 +98,7 @@ func (m Model) handleProjectMouseClick(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 				m.openProjectActionMenu()
 				return m, nil
 			}
-			return m, m.startProjectTreeScan()
+			return m, m.projectClickCommand(project)
 		}
 		if workspaceIndex, ok := m.projectListProjectAt(line); ok && workspaceIndex < 0 && m.projectResult != nil {
 			index := -workspaceIndex - 1
@@ -121,11 +125,24 @@ func (m Model) handleProjectMouseClick(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 			m.projectDetailScroll = 0
 			if mouse.Button == tea.MouseRight {
 				m.openProjectActionMenu()
+				return m, nil
 			}
-			return m, m.startProjectTreeScan()
+			return m, m.projectClickCommand(project)
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) projectClickCommand(project projects.Project) tea.Cmd {
+	now := time.Now()
+	if m.lastProjectClickPath == project.Path && !m.lastProjectClickAt.IsZero() && now.Sub(m.lastProjectClickAt) <= 450*time.Millisecond {
+		m.lastProjectClickPath = ""
+		m.lastProjectClickAt = time.Time{}
+		return m.openProjectCmd(project)
+	}
+	m.lastProjectClickPath = project.Path
+	m.lastProjectClickAt = now
+	return m.startProjectTreeScan()
 }
 
 func (m Model) projectPanelTop() int {

@@ -233,30 +233,32 @@ type Model struct {
 	progressDone        int64
 	progressTotal       int64
 
-	projectsLoading     bool
-	projectsLoaded      bool
-	projectResult       *projects.Result
-	projectsErr         error
-	projectCursor       int
-	projectScroll       int
-	projectListScroll   int
-	projectDetailScroll int
-	projectFocus        projectFocus
-	projectTab          projectTab
-	projectExpanded     map[string]bool
-	projectFilter       string
-	projectFiltering    bool
-	projectCancel       context.CancelFunc
-	projectRequest      int
-	projectTreeRequest  int
-	projectTreePath     string
-	projectTree         []projects.TreeEntry
-	projectTreeLoading  bool
-	projectTreeErr      error
-	projectTreeCancel   context.CancelFunc
-	createWizard        projectCreateWizard
-	projectActionMenu   bool
-	projectActionCursor int
+	projectsLoading      bool
+	projectsLoaded       bool
+	projectResult        *projects.Result
+	projectsErr          error
+	projectCursor        int
+	projectScroll        int
+	projectListScroll    int
+	projectDetailScroll  int
+	projectFocus         projectFocus
+	projectTab           projectTab
+	projectExpanded      map[string]bool
+	projectFilter        string
+	projectFiltering     bool
+	projectCancel        context.CancelFunc
+	projectRequest       int
+	projectTreeRequest   int
+	projectTreePath      string
+	projectTree          []projects.TreeEntry
+	projectTreeLoading   bool
+	projectTreeErr       error
+	projectTreeCancel    context.CancelFunc
+	lastProjectClickPath string
+	lastProjectClickAt   time.Time
+	createWizard         projectCreateWizard
+	projectActionMenu    bool
+	projectActionCursor  int
 
 	rootPicker projectRootPicker
 	// projectRootOverride is session-local and is set only after the user
@@ -775,7 +777,7 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.screen == ScreenProjects {
-		if key == "/" {
+		if key == "/" || key == "f" {
 			m.projectFiltering = true
 			return m, nil
 		}
