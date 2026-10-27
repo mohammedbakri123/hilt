@@ -50,7 +50,7 @@ func (m *Model) openBuildRunDialog() {
 
 	m.buildRunDialog = buildRunDialog{
 		open:          true,
-		field:         buildRunFieldTarget,
+		field:         buildRunFieldMode,
 		mode:          buildRunBuild,
 		configuration: "Debug",
 		targets:       targets,

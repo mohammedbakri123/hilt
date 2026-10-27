@@ -90,6 +90,29 @@ func (m *Model) startProjectAction() tea.Cmd {
 		}
 	}
 	args := projectActionArguments(action, targetPath)
+	if action.kind == projectActionCommand && len(action.args) > 0 && action.args[0] == "run" && !action.workspace {
+		project, ok := m.selectedProject()
+		if !ok {
+			m.setStatus("Select a project before running it.", true)
+			return nil
+		}
+		workingDirectory := project.Directory
+		if workingDirectory == "" {
+			workingDirectory = filepath.Dir(project.Path)
+		}
+		runArgs, err := execution.RunArgs(targetPath, "Debug", "", nil)
+		if err != nil {
+			m.setStatus("Could not prepare the run command: "+err.Error(), true)
+			return nil
+		}
+		return m.startRunRequest(project, execution.CommandRequest{
+			DotnetPath:       m.selection.DotnetPath,
+			ProjectPath:      targetPath,
+			WorkingDirectory: workingDirectory,
+			Arguments:        runArgs,
+			Environment:      m.selection.Environment(nil),
+		})
+	}
 	refreshProjects := action.kind == projectActionPackageAdd || action.kind == projectActionPackageRemove || action.kind == projectActionPackageUpdate
 	if projectActionNeedsConfirmation(action.kind) {
 		m.queueProjectActionConfirmation(action.label, name, targetPath, args, refreshProjects)
@@ -279,6 +302,9 @@ func projectActionDescription(action projectAction) string {
 	}
 	if action.workspace {
 		return "whole solution"
+	}
+	if len(action.args) > 0 && action.args[0] == "run" {
+		return "start app server"
 	}
 	return "dotnet " + strings.Join(action.args, " ")
 }

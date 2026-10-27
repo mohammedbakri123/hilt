@@ -156,7 +156,11 @@ func (m Model) renderDrawer(width int) []string {
 
 	body := m.drawer.lines
 	if len(body) == 0 {
-		body = []string{"No build output yet. No logs captured yet; start a build or run to stream output here."}
+		message := "No build output yet. No logs captured yet; start a build or run to stream output here."
+		if m.drawer.kind == "RUN LOGS" {
+			message = "No run logs captured yet. The server may still be starting; output will appear here."
+		}
+		body = []string{message}
 	}
 	window := windowLines(body, inner, height-4, m.drawerOffset())
 	for _, line := range window {

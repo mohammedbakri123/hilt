@@ -30,6 +30,9 @@ func (m Model) projectExecutionStatus(project projects.Project, width int) []str
 	switch {
 	case m.buildRunning:
 		state = verb + "ING"
+		if m.buildMode == buildRunRun {
+			state = "RUNNING"
+		}
 		stateStyle = styleWarning
 	case m.buildResult != nil && (m.buildResult.Cancelled || errors.Is(m.buildErr, context.Canceled)):
 		state = "CANCELLED"

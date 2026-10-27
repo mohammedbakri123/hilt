@@ -121,6 +121,8 @@ type fakeBackend struct {
 	buildRecords        *[]state.BuildTarget
 	buildRecordErr      error
 	commandRequests     *[]execution.CommandRequest
+	commandStarted      chan struct{}
+	commandBlock        chan struct{}
 
 	directories        map[string][]string
 	directoryErr       map[string]error
@@ -219,13 +221,23 @@ func (f fakeBackend) ProjectTree(context.Context, string) ([]projects.TreeEntry,
 	return []projects.TreeEntry{{Name: "App.csproj", RelativePath: "App.csproj"}}, nil
 }
 
-func (f fakeBackend) RunProjectCommand(_ context.Context, request execution.CommandRequest, stdout, _ io.Writer) (execution.Result, error) {
+func (f fakeBackend) RunProjectCommand(ctx context.Context, request execution.CommandRequest, stdout, _ io.Writer) (execution.Result, error) {
 	f.record("project-command")
 	if f.commandRequests != nil {
 		*f.commandRequests = append(*f.commandRequests, request)
 	}
 	if stdout != nil {
 		_, _ = io.WriteString(stdout, "command output\n")
+	}
+	if f.commandStarted != nil {
+		close(f.commandStarted)
+	}
+	if f.commandBlock != nil {
+		select {
+		case <-f.commandBlock:
+		case <-ctx.Done():
+			return execution.Result{Started: true, Cancelled: true}, ctx.Err()
+		}
 	}
 	return execution.Result{Started: true}, nil
 }
@@ -1914,6 +1926,59 @@ func TestProjectActionMenuRunsSelectedCommand(t *testing.T) {
 	}
 }
 
+func TestProjectActionRunUsesLiveServerSession(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.commandStarted = make(chan struct{})
+	backend.commandBlock = make(chan struct{})
+	requests := []execution.CommandRequest{}
+	backend.commandRequests = &requests
+	model := openProjects(t, backend, 120, 36)
+	updated, openCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, openCommand))
+
+	model = press(t, model, key('m', "m"))
+	runIndex, ok := projectActionIndex(model, "Run")
+	if !ok {
+		t.Fatal("Run action missing")
+	}
+	model.projectActionCursor = runIndex
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil || !model.buildRunning || model.drawer.kind != "RUN LOGS" {
+		t.Fatalf("run state: command=%v running=%v drawer=%q", command != nil, model.buildRunning, model.drawer.kind)
+	}
+
+	batch, ok := command().(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("run command = %T, want batch", command())
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- batch[0]() }()
+	select {
+	case <-backend.commandStarted:
+	case <-time.After(time.Second):
+		t.Fatal("run command did not start")
+	}
+	if len(requests) != 1 || strings.Join(requests[0].Arguments, "\x00") != "run\x00/work/src/Shop/Shop.csproj\x00--nologo\x00--configuration\x00Debug" {
+		t.Fatalf("run request = %+v", requests)
+	}
+	if !strings.Contains(ansi.Strip(model.View().Content), "RUNNING") {
+		t.Fatalf("live run status was not rendered:\n%s", ansi.Strip(model.View().Content))
+	}
+
+	model = press(t, model, key('s', "s"))
+	if !model.buildCancelling {
+		t.Fatal("s should stop the running server")
+	}
+	updated, _ = model.Update(<-done)
+	model = updated.(Model)
+	if model.buildRunning {
+		t.Fatal("run remained active after cancellation")
+	}
+}
+
 func projectActionIndex(model Model, label string) (int, bool) {
 	for index, action := range model.projectActionsForCurrent() {
 		if action.label == label {
@@ -2929,8 +2994,8 @@ func TestBuildRunDialogRunsWithArgumentsAndEnvironment(t *testing.T) {
 	backend.commandRequests = &requests
 	model := openProjects(t, backend, 120, 40)
 	model = press(t, model, key('B', "B"))
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
 	model.buildRunDialog.target = 1
-	model.buildRunDialog.mode = buildRunRun
 	model.buildRunDialog.configuration = "Release"
 	model.buildRunDialog.framework = 1
 	model.buildRunDialog.arguments = `-- --name "hello world"`
