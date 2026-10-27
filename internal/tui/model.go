@@ -30,6 +30,8 @@ type Backend interface {
 	ConfigWarnings() []string
 	State() state.State
 	RecordProjectOpen(projectPath, workspacePath string) error
+	PinExternalProject(path string) error
+	UnpinExternalProject(path string) error
 	PackageManager() *platform.PackageManager
 	Inventory(ctx context.Context) (dotnet.Inventory, error)
 	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
@@ -99,6 +101,11 @@ type doctorMsg struct {
 type projectOpenedMsg struct {
 	project projects.Project
 	err     error
+}
+
+type projectImportMsg struct {
+	path string
+	err  error
 }
 
 type projectsMsg struct {
@@ -476,6 +483,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampScroll()
 		return m, nil
 
+	case projectImportMsg:
+		m.clearPrompt()
+		if message.err != nil {
+			m.setStatus("Could not import project source: "+message.err.Error(), true)
+			return m, nil
+		}
+		m.setStatus("Imported project source: "+message.path, false)
+		return m, m.startProjectsScan()
+
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	}
@@ -657,6 +673,12 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "p":
 			return m, m.openProjectRootPicker()
+		case "a":
+			m.prompt = promptImportPath
+			m.promptInput = ""
+			m.promptFocusInput = true
+			m.setStatus("", false)
+			return m, nil
 		case "b":
 			return m, m.startBuild()
 		case ",":
@@ -753,6 +775,40 @@ func (m Model) handleQuitConfirmKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 
 func (m Model) handlePromptKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := message.String()
+	if m.prompt == promptImportPath {
+		switch key {
+		case "esc", "ctrl+c":
+			m.clearPrompt()
+			m.setStatus("Import cancelled.", false)
+			return m, nil
+		case "enter":
+			path := strings.TrimSpace(m.promptInput)
+			if path == "" {
+				m.setStatus("Enter a directory, project, or solution path.", true)
+				return m, nil
+			}
+			backend := m.backend
+			return m, func() tea.Msg {
+				if backend == nil {
+					return projectImportMsg{path: path, err: errors.New("no backend configured")}
+				}
+				return projectImportMsg{path: path, err: backend.PinExternalProject(path)}
+			}
+		case "backspace", "ctrl+h":
+			if m.promptInput != "" {
+				runes := []rune(m.promptInput)
+				m.promptInput = string(runes[:len(runes)-1])
+			}
+			return m, nil
+		case "ctrl+u":
+			m.promptInput = ""
+			return m, nil
+		}
+		if message.Text != "" && message.Mod&tea.ModCtrl == 0 && message.Mod&tea.ModAlt == 0 {
+			m.promptInput += message.Text
+		}
+		return m, nil
+	}
 	if m.prompt == promptInstallSDK {
 		switch key {
 		case "esc", "ctrl+c":

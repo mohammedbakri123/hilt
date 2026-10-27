@@ -83,7 +83,32 @@ func (m Model) render(width, height int) string {
 	if m.rootPicker.open {
 		content = overlayCentered(content, m.renderProjectRootPicker(width, height), width, height)
 	}
+	if m.prompt == promptImportPath {
+		content = overlayCentered(content, m.renderProjectImportPrompt(width), width, height)
+	}
 	return content
+}
+
+func (m Model) renderProjectImportPrompt(width int) string {
+	boxWidth := 72
+	if boxWidth > width-4 {
+		boxWidth = width - 4
+	}
+	if boxWidth < 24 {
+		boxWidth = 24
+	}
+	input := m.promptInput
+	if input == "" {
+		input = styleFaint.Render("~/project/dotnet/App.csproj or ~/project/dotnet")
+	}
+	content := []string{
+		styleMuted.Render("Import and pin a directory, .csproj, .sln, .slnx, or .slnf."),
+		"",
+		styleLabel.Render("path") + "  " + input + styleAccent.Render("▌"),
+		"",
+		styleKey.Render("enter") + " import and rescan    " + styleKey.Render("esc") + " cancel",
+	}
+	return styleCallout.Width(boxWidth).Render(strings.Join(content, "\n"))
 }
 
 func (m Model) renderQuitDialog(width int) string {
@@ -146,6 +171,8 @@ func (m Model) footerContext() keyContext {
 			return ctxPromptSDKInput
 		}
 		return ctxPromptSDKList
+	case m.prompt == promptImportPath:
+		return ctxProjectImport
 	case m.prompt != promptNone:
 		return ctxPromptRuntime
 	case m.confirm != confirmNone:

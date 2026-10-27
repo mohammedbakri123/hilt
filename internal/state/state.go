@@ -39,6 +39,34 @@ type State struct {
 	LastBuild              *BuildTarget    `json:"lastBuild,omitempty"`
 }
 
+// PinExternalProject adds a project, solution, or directory to the user's
+// persistent project sources. Duplicate paths are ignored.
+func (s *State) PinExternalProject(path string) {
+	if s == nil || path == "" {
+		return
+	}
+	for _, existing := range s.PinnedExternalProjects {
+		if existing == path {
+			return
+		}
+	}
+	s.PinnedExternalProjects = append(s.PinnedExternalProjects, path)
+}
+
+// UnpinExternalProject removes a previously pinned project source.
+func (s *State) UnpinExternalProject(path string) {
+	if s == nil {
+		return
+	}
+	filtered := s.PinnedExternalProjects[:0]
+	for _, existing := range s.PinnedExternalProjects {
+		if existing != path {
+			filtered = append(filtered, existing)
+		}
+	}
+	s.PinnedExternalProjects = filtered
+}
+
 // Defaults returns empty state for the current schema.
 func Defaults() State {
 	return State{

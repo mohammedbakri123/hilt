@@ -183,6 +183,46 @@ func (a *App) RecordProjectOpen(projectPath, workspacePath string) error {
 	return nil
 }
 
+// PinExternalProject validates and remembers a project source outside the
+// configured default root. The source may be a directory, project, or solution
+// file and is never copied into Hilt's home.
+func (a *App) PinExternalProject(path string) error {
+	resolved, err := canonicalProjectPath(path)
+	if err != nil {
+		return fmt.Errorf("pin project source: %w", err)
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+
+	current := a.state
+	current.SchemaVersion = state.CurrentSchemaVersion
+	current.PinExternalProject(resolved)
+	if err := a.stateStore.Save(current); err != nil {
+		return fmt.Errorf("save project state: %w", err)
+	}
+	a.state = current
+	return nil
+}
+
+// UnpinExternalProject removes a remembered external project source.
+func (a *App) UnpinExternalProject(path string) error {
+	resolved, err := canonicalProjectPath(path)
+	if err != nil {
+		return fmt.Errorf("unpin project source: %w", err)
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+
+	current := a.state
+	current.SchemaVersion = state.CurrentSchemaVersion
+	current.UnpinExternalProject(resolved)
+	if err := a.stateStore.Save(current); err != nil {
+		return fmt.Errorf("save project state: %w", err)
+	}
+	a.state = current
+	return nil
+}
+
 // RecordBuildTarget remembers the most recent project Hilt built. Callers must
 // only record a target after the build command was actually started.
 func (a *App) RecordBuildTarget(target state.BuildTarget) error {
@@ -405,6 +445,46 @@ func canonicalDirectory(path string) (string, error) {
 		return "", fmt.Errorf("%s is not a directory", resolved)
 	}
 	return resolved, nil
+}
+
+func canonicalProjectPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		path = filepath.Join(aHome(path), strings.TrimPrefix(path, "~/"))
+	}
+	if path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("%s is not an absolute path", path)
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", absolute, err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", resolved, err)
+	}
+	if info.IsDir() {
+		return filepath.Clean(resolved), nil
+	}
+	if _, ok := projects.KindForPath(resolved); !ok {
+		return "", fmt.Errorf("%s is not a supported project or solution path", resolved)
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func aHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Dir(path)
+	}
+	return home
 }
 
 // InspectProject parses one project or solution file.

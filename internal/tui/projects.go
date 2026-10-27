@@ -60,10 +60,51 @@ func (m *Model) startProjectsScan() tea.Cmd {
 	m.projectsLoading = true
 	m.projectsErr = nil
 	backend := m.backend
+	roots := append([]string{""}, backend.State().PinnedExternalProjects...)
 	return func() tea.Msg {
-		result, err := backend.ScanProjects(ctx, "", false)
-		return projectsMsg{request: request, result: result, err: err}
+		var combined projects.Result
+		for index, root := range roots {
+			result, err := backend.ScanProjects(ctx, root, false)
+			if err != nil {
+				if index == 0 {
+					return projectsMsg{request: request, err: err}
+				}
+				combined.Warnings = append(combined.Warnings, "pinned source "+root+": "+err.Error())
+				continue
+			}
+			if index == 0 {
+				combined = result
+				continue
+			}
+			combined = mergeProjectResults(combined, result)
+		}
+		return projectsMsg{request: request, result: combined}
 	}
+}
+
+func mergeProjectResults(left, right projects.Result) projects.Result {
+	seenProjects := make(map[string]bool, len(left.Projects))
+	for _, project := range left.Projects {
+		seenProjects[project.Path] = true
+	}
+	for _, project := range right.Projects {
+		if !seenProjects[project.Path] {
+			left.Projects = append(left.Projects, project)
+			seenProjects[project.Path] = true
+		}
+	}
+	seenWorkspaces := make(map[string]bool, len(left.Workspaces))
+	for _, workspace := range left.Workspaces {
+		seenWorkspaces[workspace.Path] = true
+	}
+	for _, workspace := range right.Workspaces {
+		if !seenWorkspaces[workspace.Path] {
+			left.Workspaces = append(left.Workspaces, workspace)
+			seenWorkspaces[workspace.Path] = true
+		}
+	}
+	left.Warnings = append(left.Warnings, right.Warnings...)
+	return left
 }
 
 func (m *Model) stopProjectScan() {

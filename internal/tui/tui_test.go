@@ -215,6 +215,22 @@ func (f fakeBackend) RecordProjectOpen(projectPath, workspacePath string) error 
 	f.state.RecentProjects = recent
 	return nil
 }
+
+func (f fakeBackend) PinExternalProject(path string) error {
+	if f.state == nil {
+		return errors.New("state unavailable")
+	}
+	f.state.PinExternalProject(path)
+	return nil
+}
+
+func (f fakeBackend) UnpinExternalProject(path string) error {
+	if f.state == nil {
+		return errors.New("state unavailable")
+	}
+	f.state.UnpinExternalProject(path)
+	return nil
+}
 func (f fakeBackend) Inventory(context.Context) (dotnet.Inventory, error) {
 	return f.inventory, f.inventoryErr
 }
@@ -1376,6 +1392,35 @@ func TestProjectsScreenScansAndShowsMetadata(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Errorf("projects screen missing %q:\n%s", want, plain)
 		}
+	}
+}
+
+func TestProjectsCanImportAndPinExternalSource(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+
+	model = press(t, model, key('a', "a"))
+	if model.prompt != promptImportPath {
+		t.Fatalf("prompt = %v, want import path", model.prompt)
+	}
+	for _, character := range "/home/me/src/Orders.sln" {
+		model = press(t, model, key(character, string(character)))
+	}
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("import did not return a command")
+	}
+	model = apply(t, model, command())
+	if model.prompt != promptNone {
+		t.Fatal("import prompt remained open")
+	}
+	if got := model.backend.State().PinnedExternalProjects; len(got) != 1 || got[0] != "/home/me/src/Orders.sln" {
+		t.Fatalf("pinned sources = %v", got)
+	}
+	if !strings.Contains(model.statusMessage, "Imported project source") {
+		t.Fatalf("status = %q", model.statusMessage)
 	}
 }
 

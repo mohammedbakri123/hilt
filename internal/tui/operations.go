@@ -41,6 +41,7 @@ const (
 	promptNone promptKind = iota
 	promptInstallSDK
 	promptInstallRuntime
+	promptImportPath
 )
 
 type confirmKind int

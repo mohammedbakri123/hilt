@@ -27,6 +27,9 @@ func (m Model) projectLines(width int) []string {
 	result := m.projectResult
 	projectList := m.filteredProjects()
 	summary := fmt.Sprintf("  %d workspaces  ·  %d projects", len(result.Workspaces), len(projectList))
+	if pinned := len(m.backend.State().PinnedExternalProjects); pinned > 0 {
+		summary += fmt.Sprintf("  ·  %d imported", pinned)
+	}
 	if m.projectFilter != "" {
 		summary = fmt.Sprintf("  %d workspaces  ·  %d/%d projects", len(result.Workspaces), len(projectList), len(result.Projects))
 	}
