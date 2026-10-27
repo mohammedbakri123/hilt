@@ -33,7 +33,7 @@ Built in pure Go with [Charm](https://charm.sh) (Bubble Tea, Lip Gloss, Bubbles)
    5 Settings             > Shop       net10.0, net8.0  src/Shop/Shop.csproj
                           Shop.Tests   net10.0          tests/Shop.Tests/Shop.Tests.csproj
 
-                      Press enter or double-click to open the detail page.
+                      Press / or f to browse folders, then enter or double-click to open.
                       Detail page: Overview · Packages · Files · EF · Output
 ─────────────────────────────────────────────────────────────────────────────────────────────
  [ok] Active project: Shop.
@@ -163,10 +163,10 @@ hilt projects list --json
 | `m` | Projects | Open project actions (build, clean, restore, test, run) |
 | `n` | Projects | Create a project from a Hilt or `dotnet new` preset |
 | `x` | Projects | Delete the selected `.csproj` file after confirmation (source preserved) |
-| `/` / `f` | Projects | Open Find & Open dialog; search by name, path, framework, or SDK |
+| `/` / `f` | Projects | Open file-explorer dialog for folders, projects, and solutions |
 | `,` / `.` | Projects | Switch active project detail tabs |
 | `tab` | Projects / SDKs| Toggle pane focus / switch between SDKs and Runtimes |
-| Mouse | Projects | Click navigation, project rows, detail tabs, and Find & Open results; double-click opens |
+| Mouse | Projects | Click navigation, explorer rows, detail tabs, and double-click to open |
 | `i` | SDKs / Home | Install managed SDK or runtime |
 | `u` | SDKs | Check for updates / apply update to selected item |
 | `x` | SDKs | Remove selected managed version (guarded with confirmation) |

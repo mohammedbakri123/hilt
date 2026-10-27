@@ -13,6 +13,9 @@ func (m Model) projectDetailProject() (projects.Project, bool) {
 	if m.projectDetailWorkspace {
 		return projects.Project{}, false
 	}
+	if m.projectDetailProjectLoaded && m.projectDetailProjectValue.Path == m.projectDetailPath {
+		return m.projectDetailProjectValue, true
+	}
 	if m.projectResult == nil || m.projectDetailPath == "" {
 		return projects.Project{}, false
 	}
@@ -25,7 +28,13 @@ func (m Model) projectDetailProject() (projects.Project, bool) {
 }
 
 func (m Model) projectDetailSolution() (projects.Workspace, bool) {
-	if !m.projectDetailWorkspace || m.projectResult == nil || m.projectDetailPath == "" {
+	if !m.projectDetailWorkspace {
+		return projects.Workspace{}, false
+	}
+	if m.projectDetailWorkspaceLoaded && m.projectDetailWorkspaceValue.Path == m.projectDetailPath {
+		return m.projectDetailWorkspaceValue, true
+	}
+	if m.projectResult == nil || m.projectDetailPath == "" {
 		return projects.Workspace{}, false
 	}
 	for _, workspace := range m.projectResult.Workspaces {
@@ -184,6 +193,10 @@ func (m *Model) closeProjectDetail() {
 	m.projectDetailOpen = false
 	m.projectDetailPath = ""
 	m.projectDetailWorkspace = false
+	m.projectDetailProjectValue = projects.Project{}
+	m.projectDetailProjectLoaded = false
+	m.projectDetailWorkspaceValue = projects.Workspace{}
+	m.projectDetailWorkspaceLoaded = false
 	m.projectDetailScroll = 0
 	m.projectFocus = projectFocusList
 	m.setStatus("Back to Projects & Solutions.", false)

@@ -225,7 +225,7 @@ func (m Model) handleProjectsMsg(message projectsMsg) (tea.Model, tea.Cmd) {
 	m.projectsLoaded = true
 	m.restoreProjectSelection(previous)
 	if m.projectFiltering {
-		m.projectFinderCursor = clampIndex(m.projectFinderCursor, len(m.filteredProjects()))
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor, len(m.projectFinderEntries()))
 	}
 	m.ensureProjectSelectionVisible()
 	m.clampScroll()
@@ -378,75 +378,49 @@ func (m Model) handleProjectFilterKey(message tea.KeyPressMsg) (tea.Model, tea.C
 	case "esc":
 		origin := m.projectFinderOrigin
 		m.projectFiltering = false
-		m.setProjectFilter("")
+		m.projectFilter = ""
 		m.restoreProjectSelection(origin)
 		m.projectFinderCursor = 0
 		m.projectFinderOrigin = ""
+		m.projectFinderEntriesCache = nil
+		m.projectFinderLoading = false
 		return m, nil
 	case "enter", "tab":
 		return m, m.openProjectFromFinder()
 	case "up", "k":
-		m.projectFinderCursor = clampIndex(m.projectFinderCursor-1, len(m.filteredProjects()))
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor-1, len(m.projectFinderEntries()))
 		return m, nil
 	case "down", "j":
-		m.projectFinderCursor = clampIndex(m.projectFinderCursor+1, len(m.filteredProjects()))
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor+1, len(m.projectFinderEntries()))
 		return m, nil
 	case "pgup":
-		m.projectFinderCursor = clampIndex(m.projectFinderCursor-6, len(m.filteredProjects()))
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor-6, len(m.projectFinderEntries()))
 		return m, nil
 	case "pgdown":
-		m.projectFinderCursor = clampIndex(m.projectFinderCursor+6, len(m.filteredProjects()))
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor+6, len(m.projectFinderEntries()))
 		return m, nil
 	case "backspace":
 		runes := []rune(m.projectFilter)
 		if len(runes) > 0 {
-			m.setProjectFilter(string(runes[:len(runes)-1]))
+			m.projectFilter = string(runes[:len(runes)-1])
 			m.projectFinderCursor = 0
+			return m, nil
+		}
+		parent := filepath.Dir(filepath.Clean(m.projectFinderPath))
+		if parent != filepath.Clean(m.projectFinderPath) {
+			return m, m.navigateProjectFinder(parent)
 		}
 		return m, nil
 	case "ctrl+u":
-		m.setProjectFilter("")
+		m.projectFilter = ""
 		m.projectFinderCursor = 0
 		return m, nil
 	}
 	if message.Text != "" && !message.Mod.Contains(tea.ModCtrl) && !message.Mod.Contains(tea.ModAlt) {
-		m.setProjectFilter(m.projectFilter + message.Text)
+		m.projectFilter += message.Text
 		m.projectFinderCursor = 0
 	}
 	return m, nil
-}
-
-func (m *Model) startProjectFinder() {
-	m.lastProjectClickPath = ""
-	m.lastProjectClickAt = time.Time{}
-	m.projectFinderOrigin = ""
-	if selected, ok := m.selectedProject(); ok {
-		m.projectFinderOrigin = selected.Path
-	}
-	m.projectFiltering = true
-	m.setProjectFilter("")
-	m.projectFinderCursor = m.projectCursor
-	if len(m.filteredProjects()) > 0 {
-		m.projectFinderCursor = clampIndex(m.projectFinderCursor, len(m.filteredProjects()))
-	} else {
-		m.projectFinderCursor = 0
-	}
-	m.setStatus("", false)
-}
-
-func (m *Model) openProjectFromFinder() tea.Cmd {
-	projectsList := m.filteredProjects()
-	if len(projectsList) == 0 {
-		m.setStatus("No matching projects. Try a name, path, framework, or SDK.", true)
-		return nil
-	}
-	project := projectsList[clampIndex(m.projectFinderCursor, len(projectsList))]
-	m.projectFiltering = false
-	m.setProjectFilter("")
-	m.restoreProjectSelection(project.Path)
-	m.projectFinderCursor = 0
-	m.projectFinderOrigin = ""
-	return m.openProjectDetail(project)
 }
 
 func (m Model) projectIsExternal(path string) bool {
@@ -572,6 +546,9 @@ func (m *Model) openProjectDetail(project projects.Project) tea.Cmd {
 	m.projectDetailOpen = true
 	m.projectDetailPath = project.Path
 	m.projectDetailWorkspace = false
+	m.projectDetailProjectValue = project
+	m.projectDetailProjectLoaded = true
+	m.projectDetailWorkspaceLoaded = false
 	m.projectDetailScroll = 0
 	m.projectListScroll = 0
 	m.projectFocus = projectFocusDetail
@@ -582,6 +559,9 @@ func (m *Model) openWorkspaceDetail(workspace projects.Workspace) tea.Cmd {
 	m.projectDetailOpen = true
 	m.projectDetailPath = workspace.Path
 	m.projectDetailWorkspace = true
+	m.projectDetailWorkspaceValue = workspace
+	m.projectDetailWorkspaceLoaded = true
+	m.projectDetailProjectLoaded = false
 	m.projectDetailScroll = 0
 	m.projectListScroll = 0
 	m.projectFocus = projectFocusDetail

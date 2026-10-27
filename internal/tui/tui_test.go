@@ -1492,28 +1492,28 @@ func TestProjectFinderMouseSelectsAndDoubleClickOpens(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
 	model := openProjects(t, backend, 100, 30)
-	model = press(t, model, key('/', "/"))
+	updated, finderCommand := model.Update(key('/', "/"))
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, finderCommand))
 	_, _, left, rowsTop, _ := model.projectFinderLayout(100, 30)
-	click := tea.MouseClickMsg{X: left + 8, Y: rowsTop + 1, Button: tea.MouseLeft}
+	click := tea.MouseClickMsg{X: left + 8, Y: rowsTop + 2, Button: tea.MouseLeft}
 
 	updated, command := model.Update(click)
 	model = updated.(Model)
 	if command != nil {
 		t.Fatal("first finder click should only select")
 	}
-	selected, ok := model.selectedProject()
-	if !ok || selected.Name != "Shop.Tests" {
-		t.Fatalf("finder mouse selected = %+v, want Shop.Tests", selected)
+	if model.projectFinderCursor != 2 {
+		t.Fatalf("finder mouse cursor = %d, want solution row", model.projectFinderCursor)
 	}
 
 	updated, command = model.Update(click)
 	model = updated.(Model)
-	if command == nil {
-		t.Fatal("second finder click should open the selected project")
+	if command != nil || !model.projectDetailOpen || !model.projectDetailWorkspace {
+		t.Fatal("second finder click should open the selected solution")
 	}
-	model = applyMessages(t, model, runCmd(t, command))
-	if got := backend.State().ActiveProject; got != "/work/tests/Shop.Tests/Shop.Tests.csproj" {
-		t.Fatalf("active project = %q", got)
+	if !strings.Contains(ansi.Strip(model.View().Content), "Solution Detail") {
+		t.Fatal("solution detail page did not open")
 	}
 }
 
@@ -2211,7 +2211,9 @@ func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
 		t.Fatalf("selected = %+v", selected)
 	}
 
-	model = press(t, model, key('/', "/"))
+	updated, finderCommand := model.Update(key('/', "/"))
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, finderCommand))
 	if !model.projectFiltering {
 		t.Fatal("/ should start filtering")
 	}
@@ -2225,7 +2227,7 @@ func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
 		t.Fatalf("selection after filter = %+v", selected)
 	}
 	plain := ansi.Strip(model.View().Content)
-	for _, want := range []string{"FIND & OPEN PROJECT", "2 matches", "Shop.Tests"} {
+	for _, want := range []string{"OPEN PROJECT OR SOLUTION", "1 item", "Shop.sln", "path  /work"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("finder missing %q:\n%s", want, plain)
 		}
@@ -2236,7 +2238,7 @@ func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
 		model = press(t, model, key(character, string(character)))
 	}
 	plain = ansi.Strip(model.View().Content)
-	for _, want := range []string{"0 matches", "No matches. Try a project name, path, framework, or SDK."} {
+	for _, want := range []string{"0 items", "No folders or supported project files here."} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("no-results state missing %q:\n%s", want, plain)
 		}
@@ -2253,24 +2255,23 @@ func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
 		t.Fatalf("clearing the finder should restore the original selection: %+v", selected)
 	}
 
-	model = press(t, model, key('/', "/"))
+	updated, finderCommand = model.Update(key('/', "/"))
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, finderCommand))
 	for _, character := range "tests" {
 		model = press(t, model, key(character, string(character)))
 	}
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(Model)
-	if model.projectFiltering {
-		t.Fatal("enter should close the finder")
-	}
-	if model.projectFilter != "" {
-		t.Fatalf("enter should clear the transient query: %q", model.projectFilter)
+	if !model.projectFiltering {
+		t.Fatal("enter on a folder should keep the explorer open")
 	}
 	if command == nil {
-		t.Fatal("enter should return an open-project command")
+		t.Fatal("enter on a folder should load that folder")
 	}
 	model = applyMessages(t, model, runCmd(t, command))
-	if !strings.Contains(ansi.Strip(model.View().Content), "Active project: Shop.Tests") {
-		t.Fatal("opening from the finder did not activate Shop.Tests")
+	if model.projectFinderPath != "/work/tests" {
+		t.Fatalf("finder path = %q, want /work/tests", model.projectFinderPath)
 	}
 }
 

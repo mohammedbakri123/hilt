@@ -49,7 +49,7 @@ func (m Model) handleMouseWheel(message tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	if m.screen == ScreenProjects && m.projectFiltering {
-		m.projectFinderCursor = clampIndex(m.projectFinderCursor+delta, len(m.filteredProjects()))
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor+delta, len(m.projectFinderEntries()))
 		return m, nil
 	}
 	if m.screen == ScreenProjects && m.projectDetailOpen {

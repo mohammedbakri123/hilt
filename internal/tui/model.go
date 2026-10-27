@@ -233,37 +233,47 @@ type Model struct {
 	progressDone        int64
 	progressTotal       int64
 
-	projectsLoading        bool
-	projectsLoaded         bool
-	projectResult          *projects.Result
-	projectsErr            error
-	projectCursor          int
-	projectScroll          int
-	projectListScroll      int
-	projectDetailScroll    int
-	projectFocus           projectFocus
-	projectTab             projectTab
-	projectExpanded        map[string]bool
-	projectFilter          string
-	projectFiltering       bool
-	projectFinderCursor    int
-	projectFinderOrigin    string
-	projectDetailOpen      bool
-	projectDetailPath      string
-	projectDetailWorkspace bool
-	projectCancel          context.CancelFunc
-	projectRequest         int
-	projectTreeRequest     int
-	projectTreePath        string
-	projectTree            []projects.TreeEntry
-	projectTreeLoading     bool
-	projectTreeErr         error
-	projectTreeCancel      context.CancelFunc
-	lastProjectClickPath   string
-	lastProjectClickAt     time.Time
-	createWizard           projectCreateWizard
-	projectActionMenu      bool
-	projectActionCursor    int
+	projectsLoading              bool
+	projectsLoaded               bool
+	projectResult                *projects.Result
+	projectsErr                  error
+	projectCursor                int
+	projectScroll                int
+	projectListScroll            int
+	projectDetailScroll          int
+	projectFocus                 projectFocus
+	projectTab                   projectTab
+	projectExpanded              map[string]bool
+	projectFilter                string
+	projectFiltering             bool
+	projectFinderCursor          int
+	projectFinderOrigin          string
+	projectFinderPath            string
+	projectFinderScroll          int
+	projectFinderLoading         bool
+	projectFinderError           error
+	projectFinderRequest         int
+	projectFinderEntriesCache    []projectFinderEntry
+	projectDetailOpen            bool
+	projectDetailPath            string
+	projectDetailWorkspace       bool
+	projectDetailProjectValue    projects.Project
+	projectDetailProjectLoaded   bool
+	projectDetailWorkspaceValue  projects.Workspace
+	projectDetailWorkspaceLoaded bool
+	projectCancel                context.CancelFunc
+	projectRequest               int
+	projectTreeRequest           int
+	projectTreePath              string
+	projectTree                  []projects.TreeEntry
+	projectTreeLoading           bool
+	projectTreeErr               error
+	projectTreeCancel            context.CancelFunc
+	lastProjectClickPath         string
+	lastProjectClickAt           time.Time
+	createWizard                 projectCreateWizard
+	projectActionMenu            bool
+	projectActionCursor          int
 
 	rootPicker projectRootPicker
 	// projectRootOverride is session-local and is set only after the user
@@ -550,6 +560,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case projectsMsg:
 		return m.handleProjectsMsg(message)
 
+	case projectFinderMsg:
+		return m.handleProjectFinderMsg(message), nil
+
 	case pickerDirectoriesMsg:
 		return m.handlePickerDirectories(message), nil
 
@@ -786,8 +799,7 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.screen == ScreenProjects {
 		if key == "/" || key == "f" {
-			m.startProjectFinder()
-			return m, nil
+			return m, m.startProjectFinder()
 		}
 		if key == "tab" || key == "shift+tab" {
 			if m.projectSplit() {

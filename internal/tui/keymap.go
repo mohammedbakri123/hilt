@@ -211,8 +211,9 @@ var keymap = map[keyContext]keyContextSpec{
 	}},
 	ctxProjectFilter: {Bindings: []keyBinding{
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
-		{Key: "type", Action: actionFilter, Label: "find", Compact: true},
+		{Key: "type", Action: actionFilter, Label: "filter", Compact: true},
 		{Key: "enter", Action: actionConfirm, Label: "open", Compact: true},
+		{Key: "backspace", Action: actionNavigate, Label: "parent", Compact: true},
 		{Key: "esc", Action: actionCancel, Label: "close", Compact: true},
 	}},
 	ctxProjectDetail: {CompactWidth: 96, Bindings: []keyBinding{
