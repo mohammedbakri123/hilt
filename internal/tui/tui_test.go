@@ -214,6 +214,10 @@ func (f fakeBackend) DeleteProject(path string) error {
 	return nil
 }
 
+func (f fakeBackend) ProjectTree(context.Context, string) ([]projects.TreeEntry, error) {
+	return []projects.TreeEntry{{Name: "App.csproj", RelativePath: "App.csproj"}}, nil
+}
+
 func (f fakeBackend) RecordProjectOpen(projectPath, workspacePath string) error {
 	if f.stateErr != nil {
 		return f.stateErr
@@ -1524,6 +1528,22 @@ func TestProjectsDeleteConfirmsAndPreservesExplicitScope(t *testing.T) {
 	}
 	if !strings.Contains(model.statusMessage, "Deleted project file") {
 		t.Fatalf("status = %q", model.statusMessage)
+	}
+}
+
+func TestProjectsTreeTabLoadsSelectedProjectFiles(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	updated, command := model.Update(key('t', "t"))
+	model = updated.(Model)
+	if model.projectTab != projectTabTree || command == nil {
+		t.Fatalf("tree tab=%v command=%v", model.projectTab, command != nil)
+	}
+	model = apply(t, model, command())
+	plain := ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "[Tree]") || !strings.Contains(plain, "App.csproj") {
+		t.Fatalf("tree tab missing loaded file:\n%s", plain)
 	}
 }
 

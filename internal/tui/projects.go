@@ -15,6 +15,7 @@ import (
 
 const (
 	projectsScanTimeout  = 30 * time.Second
+	projectTreeTimeout   = 15 * time.Second
 	projectSplitMinWidth = 120
 )
 
@@ -30,6 +31,7 @@ type projectTab int
 const (
 	projectTabOverview projectTab = iota
 	projectTabPackages
+	projectTabTree
 	projectTabData
 	projectTabOutput
 )
@@ -40,13 +42,82 @@ var projectTabs = []struct {
 }{
 	{title: "OVERVIEW", label: "Overview"},
 	{title: "PACKAGES", label: "Packages"},
+	{title: "TREE", label: "Tree"},
 	{title: "DATA", label: "Data"},
 	{title: "OUTPUT", label: "Output"},
 }
 
+var projectTabCycle = []projectTab{
+	projectTabOverview,
+	projectTabPackages,
+	projectTabData,
+	projectTabOutput,
+}
+
 func (m *Model) moveProjectTab(delta int) {
-	m.projectTab = projectTab((int(m.projectTab) + delta + len(projectTabs)) % len(projectTabs))
+	index := 0
+	for candidate, tab := range projectTabCycle {
+		if tab == m.projectTab {
+			index = candidate
+			break
+		}
+	}
+	if m.projectTab == projectTabTree {
+		if delta > 0 {
+			m.projectTab = projectTabData
+		} else {
+			m.projectTab = projectTabPackages
+		}
+	} else {
+		m.projectTab = projectTabCycle[(index+delta+len(projectTabCycle))%len(projectTabCycle)]
+	}
 	m.projectDetailScroll = 0
+}
+
+func (m *Model) startProjectTreeScan() tea.Cmd {
+	if m.projectTab != projectTabTree {
+		return nil
+	}
+	project, ok := m.selectedProject()
+	if !ok || m.backend == nil {
+		return nil
+	}
+	if m.projectTreePath == project.Path && m.projectTree != nil && m.projectTreeErr == nil {
+		return nil
+	}
+	if m.projectTreeCancel != nil {
+		m.projectTreeCancel()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), projectTreeTimeout)
+	m.projectTreeCancel = cancel
+	m.projectTreeRequest++
+	request := m.projectTreeRequest
+	path := project.Path
+	m.projectTreePath = path
+	m.projectTree = nil
+	m.projectTreeErr = nil
+	m.projectTreeLoading = true
+	backend := m.backend
+	return func() tea.Msg {
+		entries, err := backend.ProjectTree(ctx, path)
+		return projectTreeMsg{request: request, path: path, entries: entries, err: err}
+	}
+}
+
+func (m Model) handleProjectTreeMsg(message projectTreeMsg) (tea.Model, tea.Cmd) {
+	if message.request != m.projectTreeRequest || message.path != m.projectTreePath {
+		return m, nil
+	}
+	if m.projectTreeCancel != nil {
+		m.projectTreeCancel()
+		m.projectTreeCancel = nil
+	}
+	m.projectTreeLoading = false
+	m.projectTreeErr = message.err
+	if message.err == nil {
+		m.projectTree = message.entries
+	}
+	return m, nil
 }
 
 func (m *Model) startProjectsScan() tea.Cmd {

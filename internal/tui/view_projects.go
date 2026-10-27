@@ -298,6 +298,29 @@ func (m Model) projectTabBar() string {
 
 func (m Model) projectTabContent(project projects.Project, width int) []string {
 	switch m.projectTab {
+	case projectTabTree:
+		if m.projectTreeLoading {
+			return []string{m.spinner.View() + " inspecting project tree..."}
+		}
+		if m.projectTreeErr != nil {
+			return []string{styleError.Render("Tree inspection failed: " + m.projectTreeErr.Error())}
+		}
+		if len(m.projectTree) == 0 {
+			return []string{styleMuted.Render("No source files found."), "", styleMuted.Render("Generated and hidden folders are omitted.")}
+		}
+		lines := []string{styleMuted.Render("Source tree · generated and hidden folders omitted")}
+		for _, entry := range m.projectTree {
+			marker := "·"
+			if entry.Directory {
+				marker = "▾"
+			}
+			indent := entry.Depth - 1
+			if indent < 0 {
+				indent = 0
+			}
+			lines = append(lines, strings.Repeat("  ", indent)+styleAccent.Render(marker)+" "+entry.Name)
+		}
+		return lines
 	case projectTabPackages:
 		return []string{
 			styleMuted.Render("No package actions yet."),

@@ -56,6 +56,7 @@ type Backend interface {
 	RecordBuildTarget(target state.BuildTarget) error
 	CreateProjects(ctx context.Context, plan projects.CreatePlan, stdout, stderr io.Writer) error
 	DeleteProject(path string) error
+	ProjectTree(ctx context.Context, path string) ([]projects.TreeEntry, error)
 }
 
 // Screen identifies a main section.
@@ -112,6 +113,13 @@ type projectImportMsg struct {
 
 type projectDeleteMsg struct {
 	project projects.Project
+	err     error
+}
+
+type projectTreeMsg struct {
+	request int
+	path    string
+	entries []projects.TreeEntry
 	err     error
 }
 
@@ -218,6 +226,12 @@ type Model struct {
 	projectFiltering    bool
 	projectCancel       context.CancelFunc
 	projectRequest      int
+	projectTreeRequest  int
+	projectTreePath     string
+	projectTree         []projects.TreeEntry
+	projectTreeLoading  bool
+	projectTreeErr      error
+	projectTreeCancel   context.CancelFunc
 	createWizard        projectCreateWizard
 
 	rootPicker projectRootPicker
@@ -536,6 +550,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Deleted project file: "+message.project.Name, false)
 		return m, m.startProjectsScan()
 
+	case projectTreeMsg:
+		return m.handleProjectTreeMsg(message)
+
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	}
@@ -740,24 +757,28 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.startBuild()
 		case ",":
 			m.moveProjectTab(-1)
-			return m, nil
+			return m, m.startProjectTreeScan()
 		case ".":
 			m.moveProjectTab(1)
-			return m, nil
+			return m, m.startProjectTreeScan()
+		case "t":
+			m.projectTab = projectTabTree
+			m.projectDetailScroll = 0
+			return m, m.startProjectTreeScan()
 		case "up", "k":
 			if m.projectSplit() && m.projectFocus == projectFocusDetail {
 				m.scrollFocusedBy(-1)
 				return m, nil
 			}
 			m.moveProject(-1)
-			return m, nil
+			return m, m.startProjectTreeScan()
 		case "down", "j":
 			if m.projectSplit() && m.projectFocus == projectFocusDetail {
 				m.scrollFocusedBy(1)
 				return m, nil
 			}
 			m.moveProject(1)
-			return m, nil
+			return m, m.startProjectTreeScan()
 		case "enter":
 			project, ok := m.selectedProject()
 			if !ok {

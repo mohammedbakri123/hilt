@@ -309,6 +309,11 @@ func (a *App) DeleteProject(path string) error {
 	return nil
 }
 
+// ProjectTree returns a bounded source tree for a project directory.
+func (a *App) ProjectTree(ctx context.Context, path string) ([]projects.TreeEntry, error) {
+	return projects.ScanTree(ctx, path, 4)
+}
+
 // PackageManager returns the detected package manager, if any.
 func (a *App) PackageManager() *platform.PackageManager { return a.packageManager }
 
