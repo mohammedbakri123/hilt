@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mohammedbakri123/hilt/internal/dotnet"
+	"github.com/mohammedbakri123/hilt/internal/execution"
 	"github.com/mohammedbakri123/hilt/internal/install"
 )
 
@@ -68,6 +69,7 @@ const (
 	opUpdateSDK        operationKind = "update-sdk"
 	opUpdateRuntime    operationKind = "update-runtime"
 	opCreateProjects   operationKind = "create-projects"
+	opProjectCommand   operationKind = "project-command"
 	updateCheckPeriod                = 45 * time.Second
 	availableSDKPeriod               = 180 * time.Second
 )
@@ -84,6 +86,8 @@ type runtimePlanMsg struct {
 
 type operationDoneMsg struct {
 	kind     operationKind
+	command  string
+	result   execution.Result
 	sdk      install.Result
 	runtime  install.RuntimeResult
 	removal  install.Removal

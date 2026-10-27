@@ -61,6 +61,7 @@ const (
 	ctxProjectFilter   keyContext = "project-filter"
 	ctxProjectImport   keyContext = "project-import"
 	ctxProjectCreate   keyContext = "project-create"
+	ctxProjectActions  keyContext = "project-actions"
 	ctxProjectRoot     keyContext = "project-root"
 	ctxSettings        keyContext = "settings"
 	ctxOutput          keyContext = "output"
@@ -162,11 +163,12 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "f", Compact: true},
-		{Key: "p", Action: actionChooseRoot, Label: "dir", Compact: true},
+		{Key: "p", Action: actionChooseRoot, Label: "d", Compact: true},
 		{Key: "a", Action: actionChooseRoot, Label: "+"},
 		{Key: "e", Action: actionToggleTree, Label: "tree"},
 		{Key: "n", Action: actionConfirm, Label: "+"},
 		{Key: "x", Action: actionRemove, Label: "rm"},
+		{Key: "m", Action: actionConfirm, Label: "+"},
 		{Key: ", .", Action: actionProjectTab, Label: "tab"},
 		{Key: "pgup/dn", Action: actionScroll, Label: "scroll"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
@@ -179,7 +181,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "enter", Action: actionConfirm, Label: "o", Compact: true},
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "f", Compact: true},
-		{Key: "p", Action: actionChooseRoot, Label: "dir", Compact: true},
+		{Key: "p", Action: actionChooseRoot, Label: "d", Compact: true},
 		{Key: "e", Action: actionToggleTree, Label: "tree"},
 		{Key: "x", Action: actionRemove, Label: "rm"},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},
@@ -220,6 +222,11 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "←/→", Action: actionSwitchFocus, Label: "mode", Compact: true},
 		{Key: "enter", Action: actionConfirm, Label: "next", Compact: true},
 		{Key: "esc", Action: actionCancel, Label: "cancel", Compact: true},
+	}},
+	ctxProjectActions: {Bindings: []keyBinding{
+		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "run", Compact: true},
+		{Key: "esc", Action: actionCancel, Label: "close", Compact: true},
 	}},
 	ctxProjectRoot: {CompactWidth: 86, Bindings: []keyBinding{
 		{Key: "esc", Action: actionCancel, Label: "cancel", Compact: true},

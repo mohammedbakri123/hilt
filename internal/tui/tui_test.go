@@ -218,6 +218,14 @@ func (f fakeBackend) ProjectTree(context.Context, string) ([]projects.TreeEntry,
 	return []projects.TreeEntry{{Name: "App.csproj", RelativePath: "App.csproj"}}, nil
 }
 
+func (f fakeBackend) RunProjectCommand(_ context.Context, _ execution.CommandRequest, stdout, _ io.Writer) (execution.Result, error) {
+	f.record("project-command")
+	if stdout != nil {
+		_, _ = io.WriteString(stdout, "command output\n")
+	}
+	return execution.Result{Started: true}, nil
+}
+
 func (f fakeBackend) RecordProjectOpen(projectPath, workspacePath string) error {
 	if f.stateErr != nil {
 		return f.stateErr
@@ -1438,7 +1446,7 @@ func TestProjectsCanImportAndPinExternalSource(t *testing.T) {
 	if command == nil {
 		t.Fatal("import did not return a command")
 	}
-	model = apply(t, model, command())
+	model = applyMessages(t, model, runCmd(t, command))
 	if model.prompt != promptNone {
 		t.Fatal("import prompt remained open")
 	}
@@ -1544,6 +1552,32 @@ func TestProjectsTreeTabLoadsSelectedProjectFiles(t *testing.T) {
 	plain := ansi.Strip(model.View().Content)
 	if !strings.Contains(plain, "[Tree]") || !strings.Contains(plain, "App.csproj") {
 		t.Fatalf("tree tab missing loaded file:\n%s", plain)
+	}
+}
+
+func TestProjectActionMenuRunsSelectedCommand(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	model = press(t, model, key('m', "m"))
+	if !model.projectActionMenu {
+		t.Fatal("project action menu did not open")
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Build", "Clean", "Restore", "Test", "Run"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("action menu missing %q", want)
+		}
+	}
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil || model.operationLabel != "Clean Shop" {
+		t.Fatalf("action command=%v label=%q", command != nil, model.operationLabel)
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if backend.calls.count("project-command") != 1 || !strings.Contains(model.statusMessage, "Clean completed") {
+		t.Fatalf("calls=%v status=%q", backend.calls.snapshot(), model.statusMessage)
 	}
 }
 

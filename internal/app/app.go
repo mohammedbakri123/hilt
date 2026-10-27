@@ -291,6 +291,12 @@ func (a *App) CreateProjects(ctx context.Context, plan projects.CreatePlan, stdo
 	return nil
 }
 
+// RunProjectCommand executes a direct dotnet project command using the
+// explicitly selected toolchain supplied by the caller.
+func (a *App) RunProjectCommand(ctx context.Context, request execution.CommandRequest, stdout, stderr io.Writer) (execution.Result, error) {
+	return execution.Command(ctx, request, stdout, stderr, a.runner)
+}
+
 // DeleteProject removes only a supported .csproj file. Source directories and
 // their contents are intentionally preserved for a separate future cleanup
 // workflow that can present a complete file inventory first.

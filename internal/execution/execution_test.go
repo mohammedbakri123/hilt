@@ -213,3 +213,23 @@ func TestBuildRequiresProjectPath(t *testing.T) {
 		t.Fatal("validation failure must not invoke the runner")
 	}
 }
+
+func TestCommandRunsDirectDotnetArguments(t *testing.T) {
+	runner := &fakeRunner{result: process.Result{ExitCode: 0, Started: true}}
+	result, err := Command(context.Background(), CommandRequest{
+		DotnetPath:       "/opt/dotnet/dotnet",
+		ProjectPath:      "/work/App/App.csproj",
+		WorkingDirectory: "/work/App",
+		Arguments:        []string{"test", "/work/App/App.csproj", "--nologo"},
+		Environment:      []string{"DOTNET_ROOT=/opt/dotnet"},
+	}, nil, nil, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Started || runner.spec.Name != "/opt/dotnet/dotnet" || runner.spec.Dir != "/work/App" {
+		t.Fatalf("result=%+v spec=%+v", result, runner.spec)
+	}
+	if strings.Join(runner.spec.Args, " ") != "test /work/App/App.csproj --nologo" {
+		t.Fatalf("args=%v", runner.spec.Args)
+	}
+}

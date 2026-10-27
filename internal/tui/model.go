@@ -57,6 +57,7 @@ type Backend interface {
 	CreateProjects(ctx context.Context, plan projects.CreatePlan, stdout, stderr io.Writer) error
 	DeleteProject(path string) error
 	ProjectTree(ctx context.Context, path string) ([]projects.TreeEntry, error)
+	RunProjectCommand(ctx context.Context, request execution.CommandRequest, stdout, stderr io.Writer) (execution.Result, error)
 }
 
 // Screen identifies a main section.
@@ -141,6 +142,19 @@ type projectCreateWizard struct {
 	solutionPath   string
 	solutionMode   int // 0 independent, 1 new solution, 2 existing solution
 	errorMessage   string
+}
+
+type projectAction struct {
+	label string
+	args  []string
+}
+
+var projectActions = []projectAction{
+	{label: "Build", args: []string{"build"}},
+	{label: "Clean", args: []string{"clean"}},
+	{label: "Restore", args: []string{"restore"}},
+	{label: "Test", args: []string{"test"}},
+	{label: "Run", args: []string{"run"}},
 }
 
 type projectsMsg struct {
@@ -233,6 +247,8 @@ type Model struct {
 	projectTreeErr      error
 	projectTreeCancel   context.CancelFunc
 	createWizard        projectCreateWizard
+	projectActionMenu   bool
+	projectActionCursor int
 
 	rootPicker projectRootPicker
 
@@ -424,6 +440,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("Project creation completed.", false)
 			return m, m.startProjectsScan()
 		}
+		if message.kind == opProjectCommand {
+			m.setStatus(message.command+" completed.", false)
+			return m, nil
+		}
 		m.updates = nil
 		m.runtimeUpdates = nil
 		m.updatesLoaded = false
@@ -581,6 +601,10 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleProjectRootPickerKey(message)
 	}
 
+	if m.projectActionMenu {
+		return m.handleProjectActionKey(message)
+	}
+
 	if m.busy() {
 		switch key {
 		case "q":
@@ -736,6 +760,9 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "m":
+			m.openProjectActionMenu()
+			return m, nil
 		case "p":
 			return m, m.openProjectRootPicker()
 		case "a":

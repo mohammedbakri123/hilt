@@ -24,6 +24,50 @@ type BuildRequest struct {
 	Environment      []string
 }
 
+// CommandRequest describes a direct dotnet subcommand for a project.
+type CommandRequest struct {
+	DotnetPath       string
+	ProjectPath      string
+	WorkingDirectory string
+	Arguments        []string
+	Environment      []string
+}
+
+// Command runs a validated dotnet subcommand and streams its output.
+func Command(ctx context.Context, request CommandRequest, stdout, stderr io.Writer, runner process.Runner) (Result, error) {
+	if strings.TrimSpace(request.DotnetPath) == "" {
+		return Result{}, fmt.Errorf("dotnet path is required")
+	}
+	if strings.TrimSpace(request.ProjectPath) == "" {
+		return Result{}, fmt.Errorf("project path is required")
+	}
+	if len(request.Arguments) == 0 || strings.TrimSpace(request.Arguments[0]) == "" {
+		return Result{}, fmt.Errorf("dotnet command is required")
+	}
+	if runner == nil {
+		runner = process.ExecRunner{}
+	}
+	workingDirectory := request.WorkingDirectory
+	if workingDirectory == "" {
+		workingDirectory = filepath.Dir(request.ProjectPath)
+	}
+	processResult, runErr := runner.Stream(ctx, process.Spec{
+		Name: request.DotnetPath,
+		Args: request.Arguments,
+		Dir:  workingDirectory,
+		Env:  request.Environment,
+	}, stdout, stderr)
+	result := Result{ExitCode: processResult.ExitCode, Duration: processResult.Duration, Started: processResult.Started}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		result.Cancelled = true
+		return result, ctxErr
+	}
+	if runErr != nil {
+		return result, fmt.Errorf("dotnet %s: %w", request.Arguments[0], runErr)
+	}
+	return result, nil
+}
+
 // Result reports the outcome of a build invocation.
 type Result struct {
 	ExitCode  int
