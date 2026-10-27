@@ -119,7 +119,7 @@ func (m Model) renderConfirmDialog(width int) string {
 			}
 		}
 	}
-	content = append(content, "", styleKey.Render("enter / y")+" confirm    "+styleKey.Render("esc / n")+" cancel")
+	content = append(content, "", styleAccent.Render("[ CONFIRM ]")+"  "+styleFaint.Render("enter / y"), styleFaint.Render("[ CANCEL ]  esc / n"))
 	boxWidth := width - 4
 	if boxWidth > 84 {
 		boxWidth = 84
@@ -166,8 +166,8 @@ func (m Model) renderQuitDialog(width int) string {
 		"",
 		"Quitting interrupts it. Press esc to stay; cancel the operation first if you want to stop it.",
 		"",
-		styleKey.Render("y / enter") + "  quit anyway",
-		styleKey.Render("esc / n") + "     stay",
+		styleAccent.Render("[ QUIT ]") + "  y / enter · quit anyway",
+		styleFaint.Render("[ STAY ]") + "  esc / n",
 	}
 	return styleCallout.Width(boxWidth).Render(strings.Join(content, "\n"))
 }

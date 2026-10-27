@@ -24,12 +24,14 @@ func (m *Model) openProjectActionMenu() {
 	}
 	m.projectActionMenu = true
 	m.projectActionCursor = 0
+	m.hoveredProjectAction = -1
 }
 
 func (m Model) handleProjectActionKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "esc", "m":
 		m.projectActionMenu = false
+		m.hoveredProjectAction = -1
 		return m, nil
 	case "up", "k":
 		actions := m.projectActionsForCurrent()
@@ -41,6 +43,7 @@ func (m Model) handleProjectActionKey(message tea.KeyPressMsg) (tea.Model, tea.C
 		return m, nil
 	case "enter":
 		m.projectActionMenu = false
+		m.hoveredProjectAction = -1
 		return m, m.startProjectAction()
 	}
 	return m, nil
@@ -251,7 +254,7 @@ func (m Model) renderProjectActionMenu(width int) string {
 			group = currentGroup
 		}
 		marker := "  "
-		if index == m.projectActionCursor {
+		if index == m.projectActionCursor || index == m.hoveredProjectAction {
 			marker = styleAccent.Render("> ")
 		}
 		line := marker + styleValue.Render(action.label)
@@ -265,7 +268,7 @@ func (m Model) renderProjectActionMenu(width int) string {
 		action := selected[clampIndex(m.projectActionCursor, len(selected))]
 		content = append(content, "", styleFaint.Render("Selected: "+projectActionDescription(action)))
 	}
-	content = append(content, "", styleFaint.Render("↑/↓ select · enter run · esc close"))
+	content = append(content, "", styleAccent.Render("click an action")+"  "+styleFaint.Render("↑/↓ select · enter run · esc close"))
 	return styleCallout.Width(boxWidth).Render(joinLines(content))
 }
 

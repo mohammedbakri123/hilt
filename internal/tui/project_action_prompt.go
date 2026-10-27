@@ -167,7 +167,7 @@ func (m Model) renderProjectActionPrompt(width int) string {
 	if m.projectActionPrompt.errorMessage != "" {
 		content = append(content, "", styleError.Render(m.projectActionPrompt.errorMessage))
 	}
-	content = append(content, "", styleFaint.Render("tab fields · enter run · esc close"))
+	content = append(content, "", styleAccent.Render("[ RUN ]")+"  "+styleFaint.Render("tab fields · enter run"), styleFaint.Render("[ CANCEL ]  esc close"))
 	return styleCallout.Width(boxWidth).Render(joinLines(append([]string{styleTitle.Render(m.projectActionPromptTitle())}, content...)))
 }
 

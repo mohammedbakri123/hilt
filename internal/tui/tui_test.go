@@ -1926,6 +1926,113 @@ func TestProjectActionMenuRunsSelectedCommand(t *testing.T) {
 	}
 }
 
+func TestProjectActionMenuMouseRunsClickedAction(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	model = press(t, model, key('m', "m"))
+
+	width, height := model.overlaySize()
+	box := model.renderProjectActionMenu(width)
+	bounds := centeredOverlayBounds(box, width, height)
+	clickY := -1
+	for index, line := range strings.Split(box, "\n") {
+		if strings.Contains(ansi.Strip(line), "Clean") {
+			clickY = bounds.top + index
+			break
+		}
+	}
+	if clickY < 0 {
+		t.Fatal("could not locate Clean action in rendered menu")
+	}
+	updated, command := model.Update(tea.MouseClickMsg{X: bounds.left + 4, Y: clickY, Button: tea.MouseLeft})
+	model = updated.(Model)
+	if command == nil || model.projectActionMenu || model.operationLabel != "Clean Shop" {
+		t.Fatalf("mouse action command=%v menu=%v label=%q", command != nil, model.projectActionMenu, model.operationLabel)
+	}
+}
+
+func TestBuildRunDialogMouseStartsFromVisibleButton(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 120, 40)
+	model = press(t, model, key('B', "B"))
+
+	width, height := model.overlaySize()
+	box := model.renderBuildRunDialog(width)
+	bounds := centeredOverlayBounds(box, width, height)
+	clickY := -1
+	for index, line := range strings.Split(box, "\n") {
+		if strings.Contains(ansi.Strip(line), "[ START ]") {
+			clickY = bounds.top + index
+			break
+		}
+	}
+	if clickY < 0 {
+		t.Fatal("could not locate Start button in rendered dialog")
+	}
+	updated, command := model.Update(tea.MouseClickMsg{X: bounds.left + 5, Y: clickY, Button: tea.MouseLeft})
+	model = updated.(Model)
+	if command == nil || model.buildRunDialog.open || !model.buildRunning {
+		t.Fatalf("mouse start command=%v dialog=%v build=%v", command != nil, model.buildRunDialog.open, model.buildRunning)
+	}
+}
+
+func TestProjectDetailMouseRunsVisibleBuildRunAction(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 120, 36)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+
+	width := model.contentWidth()
+	lines := model.projectDetailLines(width)
+	lineIndex := -1
+	lineText := ""
+	for index, line := range lines {
+		plain := ansi.Strip(line)
+		if strings.Contains(plain, "B build / run") {
+			lineIndex = index
+			lineText = plain
+			break
+		}
+	}
+	if lineIndex < 0 {
+		t.Fatal("project detail build/run action is not rendered")
+	}
+	start := strings.Index(lineText, "B build / run")
+	contentX := contentInset
+	if model.showSidebar() {
+		contentX += sidebarWidth
+	}
+	updated, command = model.Update(tea.MouseClickMsg{
+		X:      contentX + start + 2,
+		Y:      headerLineCount + lineIndex,
+		Button: tea.MouseLeft,
+	})
+	model = updated.(Model)
+	if command != nil || !model.buildRunDialog.open {
+		t.Fatalf("detail action command=%v dialog=%v", command != nil, model.buildRunDialog.open)
+	}
+}
+
+func TestBusyMouseCannotCloseProjectDetail(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 120, 36)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+	model.buildRunning = true
+
+	updated, command = model.Update(tea.MouseClickMsg{X: 10, Y: headerLineCount + 3, Button: tea.MouseLeft})
+	model = updated.(Model)
+	if command != nil || !model.projectDetailOpen {
+		t.Fatalf("busy click changed detail state: command=%v open=%v", command != nil, model.projectDetailOpen)
+	}
+}
+
 func TestProjectActionRunUsesLiveServerSession(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()

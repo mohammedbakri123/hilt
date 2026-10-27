@@ -209,19 +209,20 @@ func (m Model) renderProjectCreateWizard(width int) string {
 			}
 			content = append(content, marker+styleValue.Render(template.Name)+"  "+styleMuted.Render(template.Description))
 		}
-		content = append(content, "", styleFaint.Render("↑/↓ select · enter continue"))
+		content = append(content, "", styleAccent.Render("[ CONTINUE ]")+"  "+styleFaint.Render("↑/↓ select"))
 	case createStageName:
-		content = append(content, styleLabel.Render("PROJECT NAME"), "  "+valueOr(m.createWizard.name, styleFaint.Render("Orders"))+styleAccent.Render("▌"), "", styleFaint.Render("enter continue · esc cancel"))
+		content = append(content, styleLabel.Render("PROJECT NAME"), "  "+valueOr(m.createWizard.name, styleFaint.Render("Orders"))+styleAccent.Render("▌"), "", styleAccent.Render("[ CONTINUE ]")+"  "+styleFaint.Render("enter"))
 	case createStageDestination:
-		content = append(content, styleLabel.Render("DESTINATION"), "  "+valueOr(m.createWizard.destination, styleFaint.Render("/home/me/projects"))+styleAccent.Render("▌"), "", styleFaint.Render("enter continue · esc cancel"))
+		content = append(content, styleLabel.Render("DESTINATION"), "  "+valueOr(m.createWizard.destination, styleFaint.Render("/home/me/projects"))+styleAccent.Render("▌"), "", styleAccent.Render("[ CONTINUE ]")+"  "+styleFaint.Render("enter"))
 	case createStageSolution:
 		modes := []string{"Independent project", "Create new solution", "Add to existing solution"}
 		content = append(content, styleLabel.Render("SOLUTION"), "  "+styleSelected.Render(modes[m.createWizard.solutionMode]), styleFaint.Render("  ←/→ change"))
 		if m.createWizard.solutionMode == 2 {
 			content = append(content, "", styleLabel.Render("solution path")+"  "+valueOr(m.createWizard.solutionPath, styleFaint.Render("/home/me/App.sln"))+styleAccent.Render("▌"))
 		}
-		content = append(content, "", styleFaint.Render("enter preview · esc cancel"))
+		content = append(content, "", styleAccent.Render("[ CONTINUE ]")+"  "+styleFaint.Render("enter preview"))
 	}
+	content = append(content, styleFaint.Render("[ CANCEL ]  esc cancel"))
 	if m.createWizard.errorMessage != "" {
 		content = append(content, "", styleError.Render(m.createWizard.errorMessage))
 	}

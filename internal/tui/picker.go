@@ -412,7 +412,7 @@ func (m Model) renderProjectRootPicker(width, height int) string {
 		}
 	}
 
-	hint := "enter open · s choose · . hidden · esc cancel"
+	hint := "[ OPEN ]  [ CHOOSE ]  [ CANCEL ]"
 	if picker.saving {
 		hint = "saving the project root..."
 	}

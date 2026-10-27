@@ -144,6 +144,36 @@ type panelSpec struct {
 	content []string
 }
 
+type overlayBounds struct {
+	left   int
+	top    int
+	width  int
+	height int
+}
+
+func centeredOverlayBounds(box string, width, height int) overlayBounds {
+	boxWidth := lipgloss.Width(box)
+	boxHeight := len(strings.Split(box, "\n"))
+	left := (width - boxWidth) / 2
+	top := (height - boxHeight) / 2
+	if left < 0 {
+		left = 0
+	}
+	if top < 0 {
+		top = 0
+	}
+	return overlayBounds{left: left, top: top, width: boxWidth, height: boxHeight}
+}
+
+func overlayLineAt(box string, bounds overlayBounds, y int) string {
+	line := y - bounds.top
+	lines := strings.Split(box, "\n")
+	if line < 0 || line >= len(lines) {
+		return ""
+	}
+	return ansi.Strip(lines[line])
+}
+
 func renderPanels(specs []panelSpec, width int) []string {
 	if len(specs) == 0 {
 		return nil

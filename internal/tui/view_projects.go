@@ -53,6 +53,7 @@ func (m Model) projectLines(width int) []string {
 		summary += "  ·  " + styleMuted.Render("root "+pickerPath(result.Root, width-12))
 	}
 	lines = append(lines, styleMuted.Render(summary))
+	lines = append(lines, styleFaint.Render("click row to select · double-click to open · right-click for actions"))
 	listContent, _ := m.projectListContent()
 	lines = append(lines, "")
 	lines = append(lines, listContent...)
@@ -66,6 +67,9 @@ func (m Model) projectRow(project projects.Project, index int, compact bool) str
 	if index == m.projectCursor {
 		marker = styleAccent.Render(">")
 		name = styleValue.Render(name)
+	} else if project.Path == m.hoveredProjectPath {
+		marker = styleHover.Render("›")
+		name = styleHover.Render(name)
 	}
 	frameworks := valueOr(strings.Join(project.TargetFrameworks, ", "), "none")
 	line := "  " + marker + " " + name

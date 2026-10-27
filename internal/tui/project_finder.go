@@ -207,7 +207,7 @@ func (m Model) renderProjectFinder(width, height int) string {
 			content = append(content, fitLine(row, innerWidth))
 		}
 	}
-	content = append(content, "", styleKey.Render("enter")+" open   "+styleKey.Render("backspace")+" parent   "+styleKey.Render("esc")+" close")
+	content = append(content, "", styleAccent.Render("[ OPEN ]")+"  "+styleMuted.Render("[ PARENT ]")+"  "+styleFaint.Render("[ CLOSE ]"))
 	return styleCallout.Width(boxWidth).Render(strings.Join(content, "\n"))
 }
 
@@ -349,6 +349,12 @@ func (m *Model) openProjectFromFinder() tea.Cmd {
 }
 
 func (m Model) handleProjectFinderMouseClick(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	if mouse.Button == tea.MouseRight {
+		m.projectFiltering = false
+		m.projectFilter = ""
+		m.projectFinderEntriesCache = nil
+		return m, nil
+	}
 	if mouse.Button != tea.MouseLeft {
 		return m, nil
 	}
@@ -358,6 +364,9 @@ func (m Model) handleProjectFinderMouseClick(mouse tea.Mouse) (tea.Model, tea.Cm
 	}
 	if height <= 0 {
 		height = 24
+	}
+	if model, command, handled := m.handleProjectFinderButtons(mouse); handled {
+		return model, command
 	}
 	index, ok := m.projectFinderIndexAt(mouse.X, mouse.Y, width, height)
 	if !ok {

@@ -14,13 +14,24 @@ const headerLineCount = 2
 
 func (m Model) handleMouseClick(message tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	mouse := message.Mouse()
+	if handled, model, command := m.handleOverlayMouseClick(mouse); handled {
+		return model, command
+	}
+	if m.drawer.open {
+		if handled, model := m.handleDrawerMouseClick(mouse); handled {
+			return model, nil
+		}
+	}
+	if m.busy() {
+		return m, nil
+	}
 	if m.screen == ScreenProjects && m.projectFiltering {
 		return m.handleProjectFinderMouseClick(mouse)
 	}
 	if m.screen == ScreenProjects && m.projectDetailOpen {
 		return m.handleProjectDetailMouseClick(mouse)
 	}
-	if m.showHelp || m.quitConfirm || m.rootPicker.open || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.projectActionPrompt.open || m.busy() {
+	if m.showHelp || m.quitConfirm || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.projectActionPrompt.open {
 		return m, nil
 	}
 
@@ -52,20 +63,19 @@ func (m Model) handleMouseWheel(message tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		m.projectFinderCursor = clampIndex(m.projectFinderCursor+delta, len(m.projectFinderEntries()))
 		return m, nil
 	}
-	if m.screen == ScreenProjects && m.projectDetailOpen {
-		m.scrollBy(delta)
-		return m, nil
-	}
-
 	if m.rootPicker.open {
 		m.movePicker(delta)
 		return m, nil
 	}
-	if m.showHelp || m.quitConfirm || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.projectActionPrompt.open {
+	if m.showHelp || m.quitConfirm || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.projectActionPrompt.open || m.busy() {
 		return m, nil
 	}
 	if m.drawer.open {
 		m.scrollDrawerBy(delta)
+		return m, nil
+	}
+	if m.screen == ScreenProjects && m.projectDetailOpen {
+		m.scrollBy(delta)
 		return m, nil
 	}
 	if m.screen == ScreenProjects && m.projectSplit() {
@@ -81,6 +91,38 @@ func (m Model) handleMouseWheel(message tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		}
 	}
 	m.scrollBy(delta)
+	return m, nil
+}
+
+func (m Model) handleMouseMotion(message tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
+	mouse := message.Mouse()
+	if m.projectActionMenu {
+		width, height := m.overlaySize()
+		box := m.renderProjectActionMenu(width)
+		bounds := centeredOverlayBounds(box, width, height)
+		line := overlayLineAt(box, bounds, mouse.Y)
+		m.hoveredProjectAction = -1
+		for index, action := range m.projectActionsForCurrent() {
+			if strings.Contains(line, action.label) {
+				m.hoveredProjectAction = index
+				break
+			}
+		}
+	}
+	if m.screen == ScreenProjects && !m.projectFiltering && !m.projectDetailOpen && !m.busy() {
+		m.hoveredProjectPath = ""
+		line := mouse.Y - headerLineCount + m.projectScroll - 5
+		listLines, _ := m.projectListContent()
+		if line >= 0 && line < len(listLines) {
+			plain := ansi.Strip(listLines[line])
+			for _, project := range m.filteredProjects() {
+				if strings.Contains(plain, project.Name) && strings.Contains(plain, project.Path) {
+					m.hoveredProjectPath = project.Path
+					break
+				}
+			}
+		}
+	}
 	return m, nil
 }
 

@@ -312,6 +312,10 @@ func (m *Model) closeProjectDetail() {
 }
 
 func (m Model) handleProjectDetailMouseClick(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	if mouse.Button == tea.MouseRight {
+		m.openProjectActionMenu()
+		return m, nil
+	}
 	if mouse.Button != tea.MouseLeft {
 		return m, nil
 	}
@@ -324,7 +328,102 @@ func (m Model) handleProjectDetailMouseClick(mouse tea.Mouse) (tea.Model, tea.Cm
 		m.projectDetailScroll = 0
 		return m, m.startProjectTreeScan()
 	}
+	width := m.contentWidth()
+	if width <= 0 {
+		width = 76
+	}
+	lineIndex := mouse.Y - headerLineCount + m.projectDetailScroll
+	lines := m.projectDetailLines(width)
+	if lineIndex >= 0 && lineIndex < len(lines) {
+		line := ansi.Strip(lines[lineIndex])
+		if command, ok := (&m).projectDetailHintMouseCommand(mouse.X, line); ok {
+			return m, command
+		}
+		if m.projectDetailWorkspace {
+			for index, path := range m.projectDetailMemberPaths() {
+				if strings.Contains(line, path) {
+					m.solutionMemberCursor = index
+					now := time.Now()
+					if m.lastProjectClickPath == path && !m.lastProjectClickAt.IsZero() && now.Sub(m.lastProjectClickAt) <= 450*time.Millisecond {
+						m.lastProjectClickPath = ""
+						m.lastProjectClickAt = time.Time{}
+						project, present, ready := m.selectedSolutionMember()
+						if present && ready {
+							m.restoreProjectSelection(project.Path)
+							m.projectDetailWorkspace = false
+							return m, m.openProjectDetail(project)
+						}
+						return m, nil
+					}
+					m.lastProjectClickPath = path
+					m.lastProjectClickAt = now
+					return m, nil
+				}
+			}
+		}
+	}
 	return m, nil
+}
+
+func (m *Model) projectDetailHintMouseCommand(x int, line string) (tea.Cmd, bool) {
+	contentX := contentInset
+	if m.showSidebar() {
+		contentX += sidebarWidth
+	}
+	relativeX := x - contentX
+	if relativeX < 0 {
+		return nil, false
+	}
+	tokens := []struct {
+		text string
+		key  string
+	}{
+		{"b quick build", "b"},
+		{"B build / run", "B"},
+		{"b build solution", "b"},
+		{"m actions", "m"},
+		{"l logs", "l"},
+		{"t files", "t"},
+	}
+	for _, token := range tokens {
+		start := strings.Index(line, token.text)
+		if start < 0 || relativeX < start || relativeX >= start+len(token.text) {
+			continue
+		}
+		switch token.key {
+		case "b":
+			if m.projectDetailWorkspace {
+				m.projectActionCursor = 0
+				return m.startProjectAction(), true
+			}
+			return m.startBuild(), true
+		case "B":
+			m.openBuildRunDialog()
+			return nil, true
+		case "m":
+			m.openProjectActionMenu()
+			return nil, true
+		case "l":
+			m.drawer.open = true
+			if m.drawer.follow {
+				m.followDrawer()
+			}
+			return nil, true
+		case "t":
+			m.projectTab = projectTabTree
+			m.projectDetailScroll = 0
+			return m.startProjectTreeScan(), true
+		}
+	}
+	return nil, false
+}
+
+func (m Model) projectDetailMemberPaths() []string {
+	workspace, ok := m.projectDetailSolution()
+	if !ok {
+		return nil
+	}
+	return workspace.ProjectPaths
 }
 
 func (m Model) projectDetailTabAt(x, y int) (projectTab, bool) {

@@ -453,7 +453,7 @@ func (m Model) renderBuildRunDialog(width int) string {
 	if m.buildRunDialog.errorMessage != "" {
 		content = append(content, "", styleError.Render(m.buildRunDialog.errorMessage))
 	}
-	content = append(content, "", styleFaint.Render("tab/shift-tab field · ↑/↓ or ←/→ change · enter start · esc close"))
+	content = append(content, "", styleAccent.Render("[ START ]")+"  "+styleMuted.Render("click fields")+"  "+styleFaint.Render("tab/shift-tab · ↑/↓ change"), styleFaint.Render("[ CANCEL ]  esc close"))
 	return styleCallout.Width(boxWidth).Render(joinLines(append([]string{styleTitle.Render("BUILD / RUN")}, content...)))
 }
 

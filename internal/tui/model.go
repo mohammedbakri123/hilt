@@ -380,6 +380,8 @@ type Model struct {
 	createWizard                 projectCreateWizard
 	projectActionMenu            bool
 	projectActionCursor          int
+	hoveredProjectAction         int
+	hoveredProjectPath           string
 	projectActionPrompt          projectActionPrompt
 	buildRunDialog               buildRunDialog
 
@@ -420,14 +422,15 @@ type Model struct {
 // Now builds the root model.
 func Now(backend Backend) Model {
 	return Model{
-		backend:          backend,
-		screen:           ScreenHome,
-		cursor:           int(ScreenHome),
-		width:            80,
-		height:           24,
-		loadingInventory: true,
-		drawer:           newOutputDrawer(),
-		spinner:          spinner.New(spinner.WithSpinner(spinner.Dot)),
+		backend:              backend,
+		screen:               ScreenHome,
+		cursor:               int(ScreenHome),
+		width:                80,
+		height:               24,
+		loadingInventory:     true,
+		drawer:               newOutputDrawer(),
+		hoveredProjectAction: -1,
+		spinner:              spinner.New(spinner.WithSpinner(spinner.Dot)),
 	}
 }
 
@@ -762,6 +765,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseWheelMsg:
 		return m.handleMouseWheel(message)
+
+	case tea.MouseMotionMsg:
+		return m.handleMouseMotion(message)
 	}
 
 	return m, nil

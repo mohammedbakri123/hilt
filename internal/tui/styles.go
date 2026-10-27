@@ -26,6 +26,7 @@ var (
 	styleLabel    = lipgloss.NewStyle().Foreground(colorMuted)
 	styleValue    = lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	styleSelected = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
+	styleHover    = lipgloss.NewStyle().Foreground(colorAccent).Underline(true)
 	styleOK       = lipgloss.NewStyle().Foreground(colorGreen)
 	styleInfo     = lipgloss.NewStyle().Foreground(colorAccent)
 	styleWarning  = lipgloss.NewStyle().Foreground(colorYellow)
