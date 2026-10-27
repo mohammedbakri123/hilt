@@ -200,6 +200,20 @@ func (f fakeBackend) CreateProjects(_ context.Context, _ projects.CreatePlan, st
 	return nil
 }
 
+func (f fakeBackend) DeleteProject(path string) error {
+	f.record("delete-project")
+	if f.projectResult.Projects != nil {
+		filtered := f.projectResult.Projects[:0]
+		for _, project := range f.projectResult.Projects {
+			if project.Path != path {
+				filtered = append(filtered, project)
+			}
+		}
+		f.projectResult.Projects = filtered
+	}
+	return nil
+}
+
 func (f fakeBackend) RecordProjectOpen(projectPath, workspacePath string) error {
 	if f.stateErr != nil {
 		return f.stateErr
@@ -1481,6 +1495,35 @@ func TestProjectsCreateWizardBuildsNewSolutionPlan(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Errorf("creation preview missing %q:\n%s", want, plain)
 		}
+	}
+}
+
+func TestProjectsDeleteConfirmsAndPreservesExplicitScope(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+
+	model = press(t, model, key('x', "x"))
+	if model.confirm != confirmDeleteProject {
+		t.Fatalf("confirm = %v, want delete confirmation", model.confirm)
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"DELETE PROJECT FILE", "source directory", "preserved"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("delete confirmation missing %q:\n%s", want, plain)
+		}
+	}
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("delete confirmation did not return a command")
+	}
+	model = apply(t, model, command())
+	if backend.calls.count("delete-project") != 1 {
+		t.Fatalf("delete calls = %v", backend.calls.snapshot())
+	}
+	if !strings.Contains(model.statusMessage, "Deleted project file") {
+		t.Fatalf("status = %q", model.statusMessage)
 	}
 }
 

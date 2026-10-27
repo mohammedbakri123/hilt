@@ -430,6 +430,8 @@ func confirmTitle(kind confirmKind) string {
 		return "UPDATE RUNTIME"
 	case confirmCreateProjects:
 		return "CREATE PROJECT"
+	case confirmDeleteProject:
+		return "DELETE PROJECT FILE"
 	default:
 		return "ACTION"
 	}

@@ -291,6 +291,24 @@ func (a *App) CreateProjects(ctx context.Context, plan projects.CreatePlan, stdo
 	return nil
 }
 
+// DeleteProject removes only a supported .csproj file. Source directories and
+// their contents are intentionally preserved for a separate future cleanup
+// workflow that can present a complete file inventory first.
+func (a *App) DeleteProject(path string) error {
+	resolved, err := canonicalProjectPath(path)
+	if err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	kind, _ := projects.KindForPath(resolved)
+	if kind != projects.KindProject {
+		return fmt.Errorf("delete project: %s is not a .csproj file", resolved)
+	}
+	if err := os.Remove(resolved); err != nil {
+		return fmt.Errorf("delete project %s: %w", resolved, err)
+	}
+	return nil
+}
+
 // PackageManager returns the detected package manager, if any.
 func (a *App) PackageManager() *platform.PackageManager { return a.packageManager }
 

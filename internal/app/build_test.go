@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -157,5 +158,29 @@ func TestCreateProjectsExecutesValidatedPlanInOrder(t *testing.T) {
 	}
 	if runner.specs[1].Args[0] != "sln" || runner.specs[1].Args[2] != "add" {
 		t.Fatalf("solution spec = %+v", runner.specs[1])
+	}
+}
+
+func TestDeleteProjectRemovesOnlyProjectFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", filepath.Join(home, "hilt"))
+	projectDir := filepath.Join(home, "src", "Orders")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(projectDir, "Orders.csproj")
+	if err := os.WriteFile(projectPath, []byte("<Project Sdk=\"Microsoft.NET.Sdk\" />"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := New("test")
+	if err := app.DeleteProject(projectPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(projectPath); !os.IsNotExist(err) {
+		t.Fatalf("project file still exists, stat error = %v", err)
+	}
+	if info, err := os.Stat(projectDir); err != nil || !info.IsDir() {
+		t.Fatalf("project directory was removed: info=%v err=%v", info, err)
 	}
 }

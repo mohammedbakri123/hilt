@@ -165,6 +165,22 @@ func (m *Model) moveProject(delta int) {
 	m.ensureProjectSelectionVisible()
 }
 
+func (m *Model) beginDeleteProject() {
+	project, ok := m.selectedProject()
+	if !ok {
+		m.setStatus("Select a project before deleting it.", true)
+		return
+	}
+	m.clearConfirm()
+	m.pendingDeleteProject = &project
+	m.confirm = confirmDeleteProject
+	m.confirmSummary = []string{
+		"Delete project file " + project.Path,
+		"The source directory and its files will be preserved.",
+		"If a solution references this project, it will need to be cleaned up separately.",
+	}
+}
+
 func (m *Model) toggleSelectedProjectWorkspace() {
 	project, ok := m.selectedProject()
 	if !ok || m.projectResult == nil {

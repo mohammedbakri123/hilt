@@ -55,6 +55,7 @@ type Backend interface {
 	BuildProject(ctx context.Context, request execution.BuildRequest, stdout, stderr io.Writer) (execution.Result, error)
 	RecordBuildTarget(target state.BuildTarget) error
 	CreateProjects(ctx context.Context, plan projects.CreatePlan, stdout, stderr io.Writer) error
+	DeleteProject(path string) error
 }
 
 // Screen identifies a main section.
@@ -107,6 +108,11 @@ type projectOpenedMsg struct {
 type projectImportMsg struct {
 	path string
 	err  error
+}
+
+type projectDeleteMsg struct {
+	project projects.Project
+	err     error
 }
 
 type createStage int
@@ -179,12 +185,13 @@ type Model struct {
 	confirm        confirmKind
 	confirmSummary []string
 
-	pendingPlan        *install.Plan
-	pendingRuntimePlan *install.RuntimePlan
-	pendingRemove      *removeTarget
-	pendingUpdate      *install.Update
-	pendingFramework   install.FrameworkFlavor
-	pendingCreatePlan  *projects.CreatePlan
+	pendingPlan          *install.Plan
+	pendingRuntimePlan   *install.RuntimePlan
+	pendingRemove        *removeTarget
+	pendingUpdate        *install.Update
+	pendingFramework     install.FrameworkFlavor
+	pendingCreatePlan    *projects.CreatePlan
+	pendingDeleteProject *projects.Project
 
 	operationRunning    bool
 	operationCancelling bool
@@ -520,6 +527,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Imported project source: "+message.path, false)
 		return m, m.startProjectsScan()
 
+	case projectDeleteMsg:
+		m.clearConfirm()
+		if message.err != nil {
+			m.setStatus("Could not delete project: "+message.err.Error(), true)
+			return m, nil
+		}
+		m.setStatus("Deleted project file: "+message.project.Name, false)
+		return m, m.startProjectsScan()
+
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	}
@@ -713,6 +729,9 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "n":
 			m.startProjectCreateWizard()
+			return m, nil
+		case "x":
+			m.beginDeleteProject()
 			return m, nil
 		case "e":
 			m.toggleSelectedProjectWorkspace()
