@@ -107,11 +107,18 @@ func (m *Model) startBuild() tea.Cmd {
 		Configuration:    "Debug",
 		Environment:      m.selection.Environment(nil),
 	}
+	return m.startBuildRequest(project, request)
+}
+
+func (m *Model) startBuildRequest(project projects.Project, request execution.BuildRequest) tea.Cmd {
 	record := state.BuildTarget{
 		ProjectPath:   project.Path,
 		WorkspacePath: m.workspaceFor(project.Path),
 		SDKVersion:    m.selection.SDKVersion,
 		Configuration: request.Configuration,
+	}
+	if project.Kind != projects.KindProject {
+		record.WorkspacePath = project.Path
 	}
 
 	m.buildRun++
@@ -124,6 +131,7 @@ func (m *Model) startBuild() tea.Cmd {
 	m.buildCh = ch
 	m.buildTarget = project
 	m.hasBuildTarget = true
+	m.buildMode = buildRunBuild
 	m.buildResult = nil
 	m.buildErr = nil
 	m.drawer.open = true
@@ -135,6 +143,31 @@ func (m *Model) startBuild() tea.Cmd {
 	m.setStatus("Building "+project.Name+"...", false)
 
 	return tea.Batch(m.buildCmd(ctx, run, request, record, ch), waitForBuild(ch))
+}
+
+func (m *Model) startRunRequest(project projects.Project, request execution.CommandRequest) tea.Cmd {
+	m.buildRun++
+	run := m.buildRun
+	ch := make(chan tea.Msg, 512)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.buildRunning = true
+	m.buildCancelling = false
+	m.buildCancel = cancel
+	m.buildCh = ch
+	m.buildTarget = project
+	m.hasBuildTarget = true
+	m.buildMode = buildRunRun
+	m.buildResult = nil
+	m.buildErr = nil
+	m.drawer.open = true
+	m.drawer.follow = true
+	m.drawer.lines = nil
+	m.drawer.scroll = 0
+	m.drawer.status = "running · " + project.Name
+	m.drawer.meta = runDrawerMeta(project, request, m.selection.SDKVersion)
+	m.setStatus("Running "+project.Name+"...", false)
+
+	return tea.Batch(m.runCmd(ctx, run, request, ch), waitForBuild(ch))
 }
 
 func (m Model) buildCmd(ctx context.Context, run int, request execution.BuildRequest, record state.BuildTarget, ch chan tea.Msg) tea.Cmd {
@@ -151,6 +184,19 @@ func (m Model) buildCmd(ctx context.Context, run int, request execution.BuildReq
 			recordErr = backend.RecordBuildTarget(record)
 		}
 		return buildDoneMsg{run: run, result: result, err: err, recordErr: recordErr}
+	}
+}
+
+func (m Model) runCmd(ctx context.Context, run int, request execution.CommandRequest, ch chan tea.Msg) tea.Cmd {
+	backend := m.backend
+	return func() tea.Msg {
+		defer close(ch)
+		stdout := &buildStreamWriter{ch: ch, run: run}
+		stderr := &buildStreamWriter{ch: ch, run: run}
+		result, err := backend.RunProjectCommand(ctx, request, stdout, stderr)
+		stdout.Flush()
+		stderr.Flush()
+		return buildDoneMsg{run: run, result: result, err: err}
 	}
 }
 
@@ -173,19 +219,23 @@ func (m *Model) finishBuild(message buildDoneMsg) {
 	isError := false
 	switch {
 	case errors.Is(message.err, context.Canceled) || message.result.Cancelled:
-		status = "Build cancelled."
+		status = m.buildMode.label() + " cancelled."
 	case message.err != nil:
 		var exitErr *process.ExitError
 		if errors.As(message.err, &exitErr) {
-			status = fmt.Sprintf("Build failed: %s exited with code %d.", m.buildTarget.Name, exitErr.Code)
+			status = fmt.Sprintf("%s failed: %s exited with code %d.", m.buildMode.label(), m.buildTarget.Name, exitErr.Code)
 		} else {
-			status = "Build failed: " + message.err.Error()
+			status = m.buildMode.label() + " failed: " + message.err.Error()
 		}
 		isError = true
 	case message.result.Started:
-		status = fmt.Sprintf("Built %s in %s.", m.buildTarget.Name, formatBuildDuration(message.result.Duration))
+		verb := "Built"
+		if m.buildMode == buildRunRun {
+			verb = "Ran"
+		}
+		status = fmt.Sprintf("%s %s in %s.", verb, m.buildTarget.Name, formatBuildDuration(message.result.Duration))
 	default:
-		status = "Build did not start."
+		status = m.buildMode.label() + " did not start."
 		isError = true
 	}
 	if message.recordErr != nil {
@@ -209,7 +259,7 @@ func (m *Model) cancelBuild() {
 	}
 	m.buildCancelling = true
 	m.drawer.status = "cancelling · " + m.buildTarget.Name
-	m.setStatus("Cancelling build...", false)
+	m.setStatus("Cancelling "+strings.ToLower(m.buildMode.label())+"...", false)
 }
 
 func formatBuildDuration(duration time.Duration) string {
@@ -244,5 +294,14 @@ func buildDrawerMeta(project projects.Project, request execution.BuildRequest, s
 	if args, err := execution.BuildArgs(request); err == nil {
 		meta = append(meta, strings.Join(append([]string{request.DotnetPath}, args...), " "))
 	}
+	return meta
+}
+
+func runDrawerMeta(project projects.Project, request execution.CommandRequest, sdkVersion string) []string {
+	meta := []string{project.Name, "SDK " + valueOr(sdkVersion, "unknown")}
+	if request.WorkingDirectory != "" {
+		meta = append(meta, request.WorkingDirectory)
+	}
+	meta = append(meta, strings.Join(append([]string{request.DotnetPath}, request.Arguments...), " "))
 	return meta
 }

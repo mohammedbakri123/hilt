@@ -68,7 +68,7 @@ func (m Model) projectDetailLines(width int) []string {
 		"",
 		styleTitle.Render(project.Name)+"  "+styleMuted.Render("["+string(project.Kind)+"]")+"  "+strings.Join(badges, " "),
 		styleFaint.Render(project.Path),
-		styleKey.Render("b")+" build   "+styleKey.Render("m")+" actions / run   "+styleKey.Render("o")+" output   "+styleKey.Render("t")+" files",
+		styleKey.Render("b")+" quick build   "+styleKey.Render("B")+" build / run   "+styleKey.Render("m")+" actions   "+styleKey.Render("o")+" output   "+styleKey.Render("t")+" files",
 		"",
 		m.projectTabBar(),
 		"",
@@ -151,6 +151,9 @@ func (m Model) handleProjectDetailKey(message tea.KeyPressMsg) (tea.Model, tea.C
 			return m, m.startProjectAction()
 		}
 		return m, m.startBuild()
+	case "B":
+		m.openBuildRunDialog()
+		return m, nil
 	case "m":
 		m.openProjectActionMenu()
 		return m, nil

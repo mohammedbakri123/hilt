@@ -68,6 +68,7 @@ const (
 	ctxOutput          keyContext = "output"
 	ctxBuild           keyContext = "build"
 	ctxBuildOutput     keyContext = "build-output"
+	ctxBuildRunDialog  keyContext = "build-run-dialog"
 	ctxNarrow          keyContext = "narrow"
 	ctxHelpNavigation  keyContext = "help-navigation"
 	ctxHelpManaged     keyContext = "help-managed"
@@ -201,6 +202,12 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "o", Action: actionToggleOutput, Label: "close", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
+	ctxBuildRunDialog: {Bindings: []keyBinding{
+		{Key: "tab", Action: actionSwitchFocus, Label: "field", Compact: true},
+		{Key: "↑/↓", Action: actionSelect, Label: "change", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "start", Compact: true},
+		{Key: "esc", Action: actionCancel, Label: "close", Compact: true},
+	}},
 	ctxOutput: {CompactWidth: 72, Bindings: []keyBinding{
 		{Key: "o", Action: actionToggleOutput, Label: "close", Compact: true},
 		{Key: "f", Action: actionFollowOutput, Label: "follow", Compact: true},
@@ -280,7 +287,7 @@ var keymap = map[keyContext]keyContextSpec{
 	ctxHelpView: {Bindings: []keyBinding{
 		{Key: "r", Action: actionRefresh, Label: "refresh", Help: "refresh inventory"},
 		{Key: "d", Action: actionDoctor, Label: "doctor", Help: "run diagnostics"},
-		{Key: "b / p", Action: actionBuild, Label: "build", Help: "build selected project / choose scan root"},
+		{Key: "b / B / p", Action: actionBuild, Label: "build", Help: "quick build / open Build-Run / choose scan root"},
 		{Key: "o", Action: actionToggleOutput, Label: "output", Help: "open or close the output drawer"},
 		{Key: "f", Action: actionFollowOutput, Label: "follow", Help: "follow or pause output"},
 		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll", Help: "scroll content or output"},

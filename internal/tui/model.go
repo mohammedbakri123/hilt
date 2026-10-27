@@ -164,6 +164,53 @@ type projectAction struct {
 	workspace bool
 }
 
+type buildRunMode int
+
+const (
+	buildRunBuild buildRunMode = iota
+	buildRunRun
+)
+
+func (mode buildRunMode) label() string {
+	if mode == buildRunRun {
+		return "Run"
+	}
+	return "Build"
+}
+
+type buildRunField int
+
+const (
+	buildRunFieldMode buildRunField = iota
+	buildRunFieldConfiguration
+	buildRunFieldTarget
+	buildRunFieldFramework
+	buildRunFieldArguments
+	buildRunFieldEnvironment
+)
+
+type buildRunTarget struct {
+	Name         string
+	Path         string
+	Directory    string
+	Workspace    bool
+	MissingCount int
+	Frameworks   []string
+}
+
+type buildRunDialog struct {
+	open          bool
+	field         buildRunField
+	mode          buildRunMode
+	configuration string
+	targets       []buildRunTarget
+	target        int
+	framework     int
+	arguments     string
+	environment   string
+	errorMessage  string
+}
+
 var projectActions = []projectAction{
 	{label: "Build", args: []string{"build"}},
 	{label: "Clean", args: []string{"clean"}},
@@ -283,6 +330,7 @@ type Model struct {
 	createWizard                 projectCreateWizard
 	projectActionMenu            bool
 	projectActionCursor          int
+	buildRunDialog               buildRunDialog
 
 	rootPicker projectRootPicker
 	// projectRootOverride is session-local and is set only after the user
@@ -309,6 +357,7 @@ type Model struct {
 	buildCh         chan tea.Msg
 	buildTarget     projects.Project
 	hasBuildTarget  bool
+	buildMode       buildRunMode
 	buildResult     *execution.Result
 	buildErr        error
 
@@ -677,6 +726,10 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleProjectRootPickerKey(message)
 	}
 
+	if m.buildRunDialog.open {
+		return m.handleBuildRunDialogKey(message)
+	}
+
 	if m.projectActionMenu {
 		return m.handleProjectActionKey(message)
 	}
@@ -862,6 +915,9 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "b":
 			return m, m.startBuild()
+		case "B":
+			m.openBuildRunDialog()
+			return m, nil
 		case "t":
 			project, ok := m.selectedProject()
 			if !ok {
@@ -929,7 +985,7 @@ func (m Model) busy() bool {
 
 func (m Model) busyLabel() string {
 	if m.buildRunning {
-		return "Building " + m.buildTarget.Name
+		return m.buildMode.label() + " " + m.buildTarget.Name
 	}
 	if m.operationRunning {
 		if m.operationLabel != "" {
