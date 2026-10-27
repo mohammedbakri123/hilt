@@ -28,6 +28,8 @@ type Backend interface {
 	ConfigWarnings() []string
 	State() state.State
 	RecordProjectOpen(projectPath, workspacePath string) error
+	PinExternalProject(path string) error
+	UnpinExternalProject(path string) error
 	PackageManager() *platform.PackageManager
 	Inventory(ctx context.Context) (dotnet.Inventory, error)
 	Resolve(ctx context.Context, inventory dotnet.Inventory) (dotnet.Selection, error)
@@ -47,6 +49,10 @@ type Backend interface {
 	InspectProject(ctx context.Context, path string) (projects.Inspection, error)
 	BuildProject(ctx context.Context, request execution.BuildRequest, stdout, stderr io.Writer) (execution.Result, error)
 	RecordBuildTarget(target state.BuildTarget) error
+	CreateProjects(ctx context.Context, plan projects.CreatePlan, stdout, stderr io.Writer) error
+	DeleteProject(path string) error
+	ProjectTree(ctx context.Context, path string) ([]projects.TreeEntry, error)
+	RunProjectCommand(ctx context.Context, request execution.CommandRequest, stdout, stderr io.Writer) (execution.Result, error)
 	Diagnose(ctx context.Context) diagnostics.Report
 	Tool(name string) (string, bool)
 }

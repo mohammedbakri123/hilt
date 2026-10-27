@@ -145,8 +145,9 @@ type projectCreateWizard struct {
 }
 
 type projectAction struct {
-	label string
-	args  []string
+	label     string
+	args      []string
+	workspace bool
 }
 
 var projectActions = []projectAction{
@@ -155,6 +156,8 @@ var projectActions = []projectAction{
 	{label: "Restore", args: []string{"restore"}},
 	{label: "Test", args: []string{"test"}},
 	{label: "Run", args: []string{"run"}},
+	{label: "Build solution", args: []string{"build"}, workspace: true},
+	{label: "Test solution", args: []string{"test"}, workspace: true},
 }
 
 type projectsMsg struct {

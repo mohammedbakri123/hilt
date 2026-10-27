@@ -60,8 +60,16 @@ Implemented:
   versioned state store package for active and recent projects.
 - Five-section TUI navigation, a global status line, a keymap-backed footer and
   help view, and a project cockpit with list/detail panes, filtering, external
-  badges, and Overview/Packages/Data/Output tabs.
+  badges, expandable solution hierarchy, arbitrary pinned imports, and
+  Overview/Packages/Tree/Data/Output tabs.
 - Active and recent project state persisted through the versioned state store.
+- Project creation wizard with standalone, new-solution, existing-solution,
+  Clean Architecture, Vertical Slice, and `dotnet new` presets, including a
+  validated dry-run preview before execution.
+- Context project actions for build, clean, restore, test, and run through the
+  selected .NET toolchain.
+- Safe `.csproj` deletion that preserves the source directory, plus bounded
+  source-tree inspection that omits generated and hidden folders.
 
 Remaining:
 
@@ -69,6 +77,7 @@ Remaining:
 - Evaluated properties through MSBuild when available; declared-only values
   labeled as such.
 - CLI-driven build, clean, restore, run, stop, and test commands (`hilt build`, `hilt run`, `hilt test`).
+- Solution membership editing and solution-folder hierarchy operations.
 - `global.json` inspection and write support.
 
 ## Phase 4 — NuGet

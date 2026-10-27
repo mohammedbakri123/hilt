@@ -75,6 +75,18 @@ func (f fakeBackend) SetDefaultProjectDir(string) error { return nil }
 func (f fakeBackend) RecordProjectOpen(string, string) error {
 	return nil
 }
+func (f fakeBackend) PinExternalProject(string) error   { return nil }
+func (f fakeBackend) UnpinExternalProject(string) error { return nil }
+func (f fakeBackend) CreateProjects(context.Context, projects.CreatePlan, io.Writer, io.Writer) error {
+	return nil
+}
+func (f fakeBackend) DeleteProject(string) error { return nil }
+func (f fakeBackend) ProjectTree(context.Context, string) ([]projects.TreeEntry, error) {
+	return nil, nil
+}
+func (f fakeBackend) RunProjectCommand(context.Context, execution.CommandRequest, io.Writer, io.Writer) (execution.Result, error) {
+	return execution.Result{}, nil
+}
 func (f fakeBackend) PackageManager() *platform.PackageManager { return nil }
 func (f fakeBackend) Inventory(context.Context) (dotnet.Inventory, error) {
 	return f.inventory, f.inventoryErr

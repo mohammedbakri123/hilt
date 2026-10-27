@@ -162,6 +162,12 @@ hilt projects list --json
 | `q` / `ctrl+c`| Global | Quit Hilt (prompts if a background build is running) |
 | `b` | Projects | Build selected project with live streaming output |
 | `p` | Projects | Open in-place scan root folder picker |
+| `a` | Projects | Add and pin a project, solution, or directory from any path |
+| `e` | Projects | Expand or collapse the selected solution in the explorer |
+| `t` | Projects | Inspect the selected project's source tree |
+| `m` | Projects | Open project actions (build, clean, restore, test, run) |
+| `n` | Projects | Create a project from a Hilt or `dotnet new` preset |
+| `x` | Projects | Delete the selected `.csproj` file after confirmation (source preserved) |
 | `/` | Projects | Filter project list |
 | `,` / `.` | Projects | Switch active project detail tabs |
 | `tab` | Projects / SDKs| Toggle pane focus / switch between SDKs and Runtimes |
@@ -199,9 +205,9 @@ Hilt organizes user data inside a clean, isolated root (`~/hilt` or custom `$HIL
 | --- | --- | :---: |
 | **Phase 1** | Standalone foundation, platform detection, `hilt doctor`, TUI shell | ✅ Complete |
 | **Phase 2** | Managed SDK/runtime install, verification, updates, manifests | ✅ Complete |
-| **Phase 3** | Solution/project scanner, metadata inspection, streaming build drawer | ✅ Complete |
+| **Phase 3** | Solution/project explorer, import, templates, actions, tree inspection, streaming execution | ✅ Complete |
 | **Phase 4** | Interactive NuGet package manager (search, add, update, audit) | 🚧 In Progress |
-| **Phase 5** | Project templating (Clean Architecture, Vertical Slice, `dotnet new`) | 📋 Planned |
+| **Phase 5** | Advanced project templating and custom blueprint discovery | 🚧 In Progress |
 | **Phase 6** | Binary distribution (x64/ARM64 packages, CI/CD, shell completions) | 📋 Planned |
 
 See [docs/roadmap.md](docs/roadmap.md) for detailed progress.

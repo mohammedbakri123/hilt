@@ -48,12 +48,20 @@ func (m *Model) startProjectAction() tea.Cmd {
 		return nil
 	}
 	action := projectActions[m.projectActionCursor]
+	targetPath := project.Path
+	if action.workspace {
+		targetPath = m.workspaceFor(project.Path)
+		if targetPath == "" {
+			m.setStatus("The selected project is not part of a solution.", true)
+			return nil
+		}
+	}
 	args := append([]string{}, action.args...)
-	args = append(args, project.Path, "--nologo")
+	args = append(args, targetPath, "--nologo")
 	request := execution.CommandRequest{
 		DotnetPath:       m.selection.DotnetPath,
-		ProjectPath:      project.Path,
-		WorkingDirectory: filepath.Dir(project.Path),
+		ProjectPath:      targetPath,
+		WorkingDirectory: filepath.Dir(targetPath),
 		Arguments:        args,
 		Environment:      m.selection.Environment(nil),
 	}
