@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -94,7 +95,7 @@ func (m Model) solutionDetailLines(lines []string) []string {
 	if len(workspace.ProjectPaths) == 0 {
 		return append(lines, styleMuted.Render("No project entries declared by this solution."))
 	}
-	for _, path := range workspace.ProjectPaths {
+	for index, path := range workspace.ProjectPaths {
 		name := path
 		status := styleWarning.Render("[missing]")
 		for _, project := range m.projectResult.Projects {
@@ -104,9 +105,31 @@ func (m Model) solutionDetailLines(lines []string) []string {
 				break
 			}
 		}
-		lines = append(lines, "  "+status+" "+styleValue.Render(name)+"  "+styleFaint.Render(path))
+		marker := "  "
+		if index == m.solutionMemberCursor {
+			marker = styleAccent.Render("> ")
+		}
+		lines = append(lines, marker+status+" "+styleValue.Render(name)+"  "+styleFaint.Render(path))
 	}
+	lines = append(lines, "", styleFaint.Render("↑/↓ select member · enter open selected member"))
 	return lines
+}
+
+func (m Model) selectedSolutionMember() (projects.Project, bool, bool) {
+	workspace, ok := m.projectDetailSolution()
+	if !ok || m.solutionMemberCursor < 0 || m.solutionMemberCursor >= len(workspace.ProjectPaths) {
+		return projects.Project{}, false, false
+	}
+	path := workspace.ProjectPaths[m.solutionMemberCursor]
+	if m.projectResult == nil {
+		return projects.Project{Path: path, Name: filepath.Base(path), Directory: filepath.Dir(path), Kind: projects.KindProject}, true, false
+	}
+	for _, project := range m.projectResult.Projects {
+		if project.Path == path {
+			return project, true, true
+		}
+	}
+	return projects.Project{Path: path, Name: filepath.Base(path), Directory: filepath.Dir(path), Kind: projects.KindProject}, true, false
 }
 
 func (m Model) handleProjectDetailKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -115,9 +138,17 @@ func (m Model) handleProjectDetailKey(message tea.KeyPressMsg) (tea.Model, tea.C
 		m.closeProjectDetail()
 		return m, nil
 	case "up", "k":
+		if m.projectDetailWorkspace {
+			m.moveSolutionMember(-1)
+			return m, nil
+		}
 		m.scrollBy(-1)
 		return m, nil
 	case "down", "j":
+		if m.projectDetailWorkspace {
+			m.moveSolutionMember(1)
+			return m, nil
+		}
 		m.scrollBy(1)
 		return m, nil
 	case "pgup":
@@ -174,20 +205,20 @@ func (m Model) handleProjectDetailKey(message tea.KeyPressMsg) (tea.Model, tea.C
 		if !m.projectDetailWorkspace {
 			return m, nil
 		}
-		workspace, ok := m.projectDetailSolution()
-		if !ok {
+		if _, ok := m.projectDetailSolution(); !ok {
 			return m, nil
 		}
-		for _, path := range workspace.ProjectPaths {
-			for _, project := range m.projectResult.Projects {
-				if project.Path == path {
-					m.restoreProjectSelection(project.Path)
-					m.projectDetailWorkspace = false
-					return m, m.openProjectDetail(project)
-				}
-			}
+		project, present, ready := m.selectedSolutionMember()
+		if !present {
+			return m, nil
 		}
-		return m, nil
+		if !ready {
+			m.setStatus("Selected solution member is missing: "+project.Path, true)
+			return m, nil
+		}
+		m.restoreProjectSelection(project.Path)
+		m.projectDetailWorkspace = false
+		return m, m.openProjectDetail(project)
 	case "?":
 		m.showHelp = true
 		return m, nil
@@ -209,6 +240,7 @@ func (m *Model) closeProjectDetail() {
 	m.projectDetailProjectLoaded = false
 	m.projectDetailWorkspaceValue = projects.Workspace{}
 	m.projectDetailWorkspaceLoaded = false
+	m.solutionMemberCursor = 0
 	m.projectDetailScroll = 0
 	m.projectFocus = projectFocusList
 	m.setStatus("Back to Projects & Solutions.", false)

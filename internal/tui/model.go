@@ -162,6 +162,41 @@ type projectAction struct {
 	label     string
 	args      []string
 	workspace bool
+	kind      projectActionKind
+}
+
+type projectActionKind int
+
+const (
+	projectActionCommand projectActionKind = iota
+	projectActionPackageList
+	projectActionPackageAdd
+	projectActionPackageRemove
+	projectActionPackageUpdate
+	projectActionPackageRestore
+	projectActionEFList
+	projectActionEFAdd
+	projectActionEFUpdate
+	projectActionEFRemove
+)
+
+type projectActionPromptKind int
+
+const (
+	projectActionPromptNone projectActionPromptKind = iota
+	projectActionPromptPackageAdd
+	projectActionPromptPackageRemove
+	projectActionPromptPackageUpdate
+	projectActionPromptEFAdd
+)
+
+type projectActionPrompt struct {
+	open         bool
+	kind         projectActionPromptKind
+	field        int
+	name         string
+	version      string
+	errorMessage string
 }
 
 type buildRunMode int
@@ -219,6 +254,11 @@ var projectActions = []projectAction{
 	{label: "Run", args: []string{"run"}},
 	{label: "Build solution", args: []string{"build"}, workspace: true},
 	{label: "Test solution", args: []string{"test"}, workspace: true},
+	{label: "List packages", kind: projectActionPackageList},
+	{label: "Add package", kind: projectActionPackageAdd},
+	{label: "Remove package", kind: projectActionPackageRemove},
+	{label: "Update package", kind: projectActionPackageUpdate},
+	{label: "Restore packages", kind: projectActionPackageRestore},
 }
 
 type projectsMsg struct {
@@ -317,6 +357,7 @@ type Model struct {
 	projectDetailProjectLoaded   bool
 	projectDetailWorkspaceValue  projects.Workspace
 	projectDetailWorkspaceLoaded bool
+	solutionMemberCursor         int
 	projectCancel                context.CancelFunc
 	projectRequest               int
 	projectTreeRequest           int
@@ -330,6 +371,7 @@ type Model struct {
 	createWizard                 projectCreateWizard
 	projectActionMenu            bool
 	projectActionCursor          int
+	projectActionPrompt          projectActionPrompt
 	buildRunDialog               buildRunDialog
 
 	rootPicker projectRootPicker
@@ -529,6 +571,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if message.kind == opProjectCommand {
 			m.setStatus(message.command+" completed.", false)
+			if message.refreshProjects {
+				return m, m.startProjectsScan()
+			}
 			return m, nil
 		}
 		m.updates = nil
@@ -728,6 +773,10 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.buildRunDialog.open {
 		return m.handleBuildRunDialogKey(message)
+	}
+
+	if m.projectActionPrompt.open {
+		return m.handleProjectActionPromptKey(message)
 	}
 
 	if m.projectActionMenu {

@@ -575,11 +575,21 @@ func (m *Model) openWorkspaceDetail(workspace projects.Workspace) tea.Cmd {
 	m.projectDetailWorkspace = true
 	m.projectDetailWorkspaceValue = workspace
 	m.projectDetailWorkspaceLoaded = true
+	m.solutionMemberCursor = 0
 	m.projectDetailProjectLoaded = false
 	m.projectDetailScroll = 0
 	m.projectListScroll = 0
 	m.projectFocus = projectFocusDetail
 	return m.openWorkspaceCmd(workspace)
+}
+
+func (m *Model) moveSolutionMember(delta int) {
+	workspace, ok := m.projectDetailSolution()
+	if !ok || len(workspace.ProjectPaths) == 0 {
+		return
+	}
+	m.solutionMemberCursor = (m.solutionMemberCursor + delta + len(workspace.ProjectPaths)) % len(workspace.ProjectPaths)
+	m.projectDetailScroll = 0
 }
 
 func (m Model) openWorkspaceCmd(workspace projects.Workspace) tea.Cmd {
