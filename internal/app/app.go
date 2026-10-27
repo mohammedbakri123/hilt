@@ -398,18 +398,12 @@ func (a *App) AvailableSDKs(ctx context.Context, allowPrerelease bool) ([]instal
 }
 
 // ScanProjects discovers projects and solutions from root. An empty root uses
-// the configured default project directory, then the Hilt projects root. The
-// current directory is only used when no other root is available.
+// Hilt's bounded workspace root (~/hilt/apps, or the equivalent HILT_HOME
+// layout). Callers that want another location must pass it explicitly.
 func (a *App) ScanProjects(ctx context.Context, root string, includeHidden bool) (projects.Result, error) {
 	current := a.Config()
 	if root == "" {
-		root = current.DefaultProjectDir
-	}
-	if root == "" {
 		root = a.paths.ProjectsRoot
-	}
-	if root == "" {
-		root = a.cwd
 	}
 	return projects.Scan(ctx, projects.Options{
 		Root:          root,

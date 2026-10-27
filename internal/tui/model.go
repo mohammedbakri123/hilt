@@ -112,6 +112,11 @@ type projectImportMsg struct {
 	err  error
 }
 
+type projectUnpinMsg struct {
+	path string
+	err  error
+}
+
 type projectDeleteMsg struct {
 	project projects.Project
 	err     error
@@ -254,6 +259,10 @@ type Model struct {
 	projectActionCursor int
 
 	rootPicker projectRootPicker
+	// projectRootOverride is session-local and is set only after the user
+	// explicitly chooses an alternate scan root. A saved legacy config value
+	// cannot silently broaden the default workspace on startup.
+	projectRootOverride string
 
 	updates        []install.Update
 	runtimeUpdates []install.Update
@@ -561,7 +570,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("Could not import project source: "+message.err.Error(), true)
 			return m, nil
 		}
-		m.setStatus("Imported project source: "+message.path, false)
+		m.setStatus("Added external source: "+message.path, false)
+		return m, m.startProjectsScan()
+
+	case projectUnpinMsg:
+		if message.err != nil {
+			m.setStatus("Could not remove external source: "+message.err.Error(), true)
+			return m, nil
+		}
+		m.setStatus("Removed external source: "+message.path, false)
 		return m, m.startProjectsScan()
 
 	case projectDeleteMsg:
@@ -578,6 +595,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
+
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(message)
+
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(message)
 	}
 
 	return m, nil
@@ -774,6 +797,8 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.promptFocusInput = true
 			m.setStatus("", false)
 			return m, nil
+		case "u":
+			return m, m.unpinSelectedExternalProject()
 		case "n":
 			m.startProjectCreateWizard()
 			return m, nil

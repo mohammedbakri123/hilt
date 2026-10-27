@@ -30,6 +30,7 @@ func (m Model) View() tea.View {
 
 	view := tea.NewView(content)
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	view.WindowTitle = "Hilt"
 	return view
 }
@@ -133,7 +134,7 @@ func (m Model) renderProjectImportPrompt(width int) string {
 		input = styleFaint.Render("~/project/dotnet/App.csproj or ~/project/dotnet")
 	}
 	content := []string{
-		styleMuted.Render("Import and pin a directory, .csproj, .sln, .slnx, or .slnf."),
+		styleMuted.Render("Add an existing directory, project, or solution without copying it."),
 		"",
 		styleLabel.Render("path") + "  " + input + styleAccent.Render("▌"),
 		"",

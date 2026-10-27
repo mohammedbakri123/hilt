@@ -12,7 +12,7 @@ import (
 
 func (m *Model) startProjectCreateWizard() {
 	m.clearConfirm()
-	destination := m.projectScanRoot()
+	destination := m.projectWorkspaceRoot()
 	if destination == "" && m.projectResult != nil {
 		destination = m.projectResult.Root
 	}

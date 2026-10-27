@@ -163,6 +163,7 @@ hilt projects list --json
 | `b` | Projects | Build selected project with live streaming output |
 | `p` | Projects | Open in-place scan root folder picker |
 | `a` | Projects | Add and pin a project, solution, or directory from any path |
+| `u` | Projects | Remove the selected imported source (files are never deleted) |
 | `e` | Projects | Expand or collapse the selected solution in the explorer |
 | `t` | Projects | Inspect the selected project's source tree |
 | `m` | Projects | Open project actions (build, clean, restore, test, run) |
@@ -171,6 +172,7 @@ hilt projects list --json
 | `/` | Projects | Filter project list |
 | `,` / `.` | Projects | Switch active project detail tabs |
 | `tab` | Projects / SDKs| Toggle pane focus / switch between SDKs and Runtimes |
+| Mouse | Projects | Click navigation, project rows, and detail tabs; wheel scrolls the focused pane |
 | `i` | SDKs / Home | Install managed SDK or runtime |
 | `u` | SDKs | Check for updates / apply update to selected item |
 | `x` | SDKs | Remove selected managed version (guarded with confirmation) |

@@ -182,6 +182,7 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "f", Compact: true},
 		{Key: "p", Action: actionChooseRoot, Label: "d", Compact: true},
+		{Key: "a", Action: actionChooseRoot, Label: "+", Compact: true},
 		{Key: "e", Action: actionToggleTree, Label: "tree"},
 		{Key: "x", Action: actionRemove, Label: "rm"},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},

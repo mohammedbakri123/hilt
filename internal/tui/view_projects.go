@@ -43,6 +43,9 @@ func (m Model) projectLines(width int) []string {
 		}
 		summary += "  ·" + styleMuted.Render(filter)
 	}
+	if root := m.projectWorkspaceRoot(); root != "" {
+		summary += "  ·  " + styleMuted.Render("workspace "+pickerPath(root, width-24))
+	}
 	if m.projectSplit() {
 		summary += "  ·  " + styleMuted.Render("focus: "+m.focusLabel())
 	}
@@ -128,7 +131,18 @@ func (m Model) projectListContent() ([]string, int) {
 	if result == nil {
 		return []string{"Projects not loaded."}, 0
 	}
-	lines := []string{styleLabel.Render("WORKSPACES  ·  press e to fold")}
+	workspaceLabel := "HILT WORKSPACE"
+	if root := m.projectWorkspaceRoot(); root != "" {
+		workspaceLabel += "  ·  " + pickerPath(root, 44)
+	}
+	lines := []string{styleLabel.Render(workspaceLabel)}
+	lines = append(lines, styleLabel.Render("WORKSPACES  ·  press e to fold"))
+	if sources := m.backend.State().PinnedExternalProjects; len(sources) > 0 {
+		lines = append(lines, "", styleLabel.Render("IMPORTED SOURCES"))
+		for _, source := range sources {
+			lines = append(lines, "  "+styleAccent.Render("+")+" "+styleMuted.Render(source))
+		}
+	}
 	if len(result.Workspaces) == 0 {
 		lines = append(lines, "  "+styleMuted.Render("none found"))
 	}
@@ -194,6 +208,55 @@ func (m Model) projectListContent() ([]string, int) {
 	return lines, selectedLine
 }
 
+// projectListProjectAt maps a rendered project-list line back to the stable
+// filtered project index. Keeping this semantic mapping beside the renderer
+// makes pointer selection follow the same hierarchy as keyboard selection.
+func (m Model) projectListProjectAt(target int) (int, bool) {
+	if m.projectResult == nil || target < 0 {
+		return 0, false
+	}
+	line := 2 // HILT WORKSPACE and WORKSPACES labels.
+	if sources := m.backend.State().PinnedExternalProjects; len(sources) > 0 {
+		line += 2 + len(sources) // blank, label, and one row per source.
+	}
+	projectList := m.filteredProjects()
+	listed := make(map[string]bool)
+	for workspaceIndex, workspace := range m.projectResult.Workspaces {
+		if line == target {
+			return -workspaceIndex - 1, true
+		}
+		line++
+		for projectIndex, project := range projectList {
+			if !containsPath(workspace.ProjectPaths, project.Path) {
+				continue
+			}
+			listed[project.Path] = true
+			if !m.workspaceExpanded(workspace.Path) {
+				continue
+			}
+			if line == target {
+				return projectIndex, true
+			}
+			line++
+		}
+	}
+	line += 2 // blank and INDEPENDENT PROJECTS.
+	if len(projectList) == 0 {
+		return 0, false
+	}
+	line++ // column headings.
+	for projectIndex, project := range projectList {
+		if listed[project.Path] {
+			continue
+		}
+		if line == target {
+			return projectIndex, true
+		}
+		line++
+	}
+	return 0, false
+}
+
 func containsPath(paths []string, target string) bool {
 	for _, path := range paths {
 		if path == target {
@@ -254,6 +317,9 @@ func (m Model) projectDetailContent(project projects.Project, width int) []strin
 	}
 	if m.projectIsExternal(project.Path) {
 		content = append(content, kvSized("Location", styleWarning.Render("external"), 12))
+		if source := m.externalSourceFor(project); source != "" {
+			content = append(content, styleMuted.Render("Press u to remove the imported source."))
+		}
 	}
 	if len(project.ProjectReferences) > 0 {
 		content = append(content, kvSized("References", fmt.Sprintf("%d", len(project.ProjectReferences)), 12))

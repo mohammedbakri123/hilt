@@ -337,6 +337,9 @@ func TestScanProjectsUsesRootAndConfiguration(t *testing.T) {
 
 	t.Chdir(externalDir)
 	application = New("test")
+	if err := application.SetDefaultProjectDir(externalDir); err != nil {
+		t.Fatalf("set custom default project directory: %v", err)
+	}
 	result, err = application.ScanProjects(context.Background(), "", false)
 	if err != nil {
 		t.Fatal(err)

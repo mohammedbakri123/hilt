@@ -132,7 +132,10 @@ func (m *Model) startProjectsScan() tea.Cmd {
 	m.projectsLoading = true
 	m.projectsErr = nil
 	backend := m.backend
-	roots := append([]string{""}, backend.State().PinnedExternalProjects...)
+	// The normal root is the configured Hilt workspace (apps/ by default). Any
+	// other path is explicit: either the user chose it with the root picker or
+	// pinned it with the import action. No filesystem-wide discovery is used.
+	roots := append([]string{m.activeProjectScanRoot()}, backend.State().PinnedExternalProjects...)
 	return func() tea.Msg {
 		var combined projects.Result
 		for index, root := range roots {
@@ -249,6 +252,49 @@ func (m *Model) beginDeleteProject() {
 		"Delete project file " + project.Path,
 		"The source directory and its files will be preserved.",
 		"If a solution references this project, it will need to be cleaned up separately.",
+	}
+}
+
+func (m Model) externalSourceFor(project projects.Project) string {
+	if m.backend == nil {
+		return ""
+	}
+	workspace := m.workspaceFor(project.Path)
+	best := ""
+	bestLength := -1
+	for _, source := range m.backend.State().PinnedExternalProjects {
+		if source == project.Path || (workspace != "" && source == workspace) {
+			return source
+		}
+		relative, err := filepath.Rel(source, project.Path)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+			continue
+		}
+		if len(source) > bestLength {
+			best = source
+			bestLength = len(source)
+		}
+	}
+	return best
+}
+
+func (m *Model) unpinSelectedExternalProject() tea.Cmd {
+	project, ok := m.selectedProject()
+	if !ok {
+		m.setStatus("Select an external project before removing its source.", true)
+		return nil
+	}
+	source := m.externalSourceFor(project)
+	if source == "" {
+		m.setStatus("The selected project is not an imported source.", true)
+		return nil
+	}
+	backend := m.backend
+	return func() tea.Msg {
+		if backend == nil {
+			return projectUnpinMsg{path: source, err: errors.New("no backend configured")}
+		}
+		return projectUnpinMsg{path: source, err: backend.UnpinExternalProject(source)}
 	}
 }
 

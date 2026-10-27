@@ -682,6 +682,9 @@ func (m *Model) clampSelection() {
 }
 
 func clampIndex(index, count int) int {
+	if count <= 0 {
+		return 0
+	}
 	if index < 0 {
 		return 0
 	}

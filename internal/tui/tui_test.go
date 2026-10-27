@@ -1411,6 +1411,38 @@ func TestProjectsViewFitsLayouts(t *testing.T) {
 	}
 }
 
+func TestProjectsMouseSelectsRowsAndTabs(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 160, 30)
+
+	updated, command := model.Update(tea.MouseClickMsg{X: 30, Y: 12, Button: tea.MouseLeft})
+	model = updated.(Model)
+	if command != nil {
+		t.Fatal("selecting a project should not start an operation")
+	}
+	selected, ok := model.selectedProject()
+	if !ok || selected.Name != "Shop.Tests" {
+		t.Fatalf("mouse selected = %+v, want Shop.Tests", selected)
+	}
+
+	updated, command = model.Update(tea.MouseClickMsg{X: 108, Y: 8, Button: tea.MouseLeft})
+	model = updated.(Model)
+	if command != nil {
+		t.Fatal("switching tabs should not start a command")
+	}
+	if model.projectTab != projectTabPackages || model.projectFocus != projectFocusDetail {
+		t.Fatalf("mouse tab = %v focus = %v, want packages/detail", model.projectTab, model.projectFocus)
+	}
+}
+
+func TestViewEnablesCellMouseMode(t *testing.T) {
+	model := loadedModel(t, newFakeBackend(), 100, 30)
+	if got := model.View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode = %v, want cell motion", got)
+	}
+}
+
 func TestProjectsScreenScansAndShowsMetadata(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
@@ -1453,7 +1485,27 @@ func TestProjectsCanImportAndPinExternalSource(t *testing.T) {
 	if got := model.backend.State().PinnedExternalProjects; len(got) != 1 || got[0] != "/home/me/src/Orders.sln" {
 		t.Fatalf("pinned sources = %v", got)
 	}
-	if !strings.Contains(model.statusMessage, "Imported project source") {
+	if !strings.Contains(model.statusMessage, "Added external source") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+}
+
+func TestProjectsCanRemovePinnedExternalSource(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.state.PinExternalProject("/work/Shop.sln")
+	model := openProjects(t, backend, 100, 30)
+
+	updated, command := model.Update(key('u', "u"))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("unpin did not return a command")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if len(model.backend.State().PinnedExternalProjects) != 0 {
+		t.Fatalf("pinned sources = %v, want empty", model.backend.State().PinnedExternalProjects)
+	}
+	if !strings.Contains(model.statusMessage, "Removed external source") {
 		t.Fatalf("status = %q", model.statusMessage)
 	}
 }

@@ -63,6 +63,30 @@ func (m Model) projectScanRoot() string {
 	return root
 }
 
+// projectWorkspaceRoot is the Hilt-owned workspace used for normal project
+// creation and the default Projects scan. External sources are opt-in through
+// the import action; they never replace this workspace.
+func (m Model) projectWorkspaceRoot() string {
+	if m.backend == nil {
+		return ""
+	}
+	root := m.backend.Paths().ProjectsRoot
+	if root == "" {
+		root = m.backend.Config().DefaultProjectDir
+	}
+	if root == "" {
+		root = m.backend.Paths().HomeDir
+	}
+	return root
+}
+
+func (m Model) activeProjectScanRoot() string {
+	if m.projectRootOverride != "" {
+		return m.projectRootOverride
+	}
+	return m.projectWorkspaceRoot()
+}
+
 func (m *Model) openProjectRootPicker() tea.Cmd {
 	if m.backend == nil {
 		return nil
@@ -174,6 +198,7 @@ func (m Model) handleProjectRootSaved(message projectRootSavedMsg) (tea.Model, t
 		return m, nil
 	}
 	m.closeProjectRootPicker()
+	m.projectRootOverride = message.path
 	m.projectFilter = ""
 	m.projectFiltering = false
 	m.projectCursor = 0
