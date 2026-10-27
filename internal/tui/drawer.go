@@ -11,6 +11,7 @@ type outputDrawer struct {
 	lines  []string
 	status string
 	meta   []string
+	kind   string
 }
 
 func newOutputDrawer() outputDrawer {
@@ -118,7 +119,7 @@ func (m Model) drawerStatusLabel() string {
 	if m.drawer.status != "" {
 		return m.drawer.status
 	}
-	return "no build yet"
+	return "no logs yet"
 }
 
 func (m Model) renderDrawer(width int) []string {
@@ -135,6 +136,7 @@ func (m Model) renderDrawer(width int) []string {
 		follow = "follow"
 	}
 	title := " " + styleLabel.Render("OUTPUT") +
+		"  " + styleAccent.Render(valueOr(m.drawer.kind, "LOGS")) +
 		"  " + styleMuted.Render("["+follow+"]") +
 		"  " + styleMuted.Render("· "+m.drawerStatusLabel())
 	lines := []string{
@@ -154,7 +156,7 @@ func (m Model) renderDrawer(width int) []string {
 
 	body := m.drawer.lines
 	if len(body) == 0 {
-		body = []string{"No build output yet. Select a project and press b to build."}
+		body = []string{"No build output yet. No logs captured yet; start a build or run to stream output here."}
 	}
 	window := windowLines(body, inner, height-4, m.drawerOffset())
 	for _, line := range window {

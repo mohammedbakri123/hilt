@@ -1,15 +1,64 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mohammedbakri123/hilt/internal/projects"
 )
+
+func (m Model) projectExecutionStatus(project projects.Project, width int) []string {
+	content := []string{}
+	if !m.hasBuildTarget || m.buildTarget.Path != project.Path {
+		content = append(content,
+			styleMuted.Render("IDLE · no build or run recorded for this project."),
+			styleFaint.Render("Press B to choose a build or run configuration."),
+		)
+		return panelBox("EXECUTION", content, width)
+	}
+
+	verb := strings.ToUpper(m.buildMode.label())
+	state := "SUCCEEDED"
+	stateStyle := styleOK
+	switch {
+	case m.buildRunning:
+		state = verb + "ING"
+		stateStyle = styleWarning
+	case m.buildResult != nil && (m.buildResult.Cancelled || errors.Is(m.buildErr, context.Canceled)):
+		state = "CANCELLED"
+		stateStyle = styleWarning
+	case m.buildErr != nil || (m.buildResult != nil && !m.buildResult.Started):
+		state = "FAILED"
+		stateStyle = styleError
+	}
+
+	duration := time.Duration(0)
+	if m.buildRunning && !m.buildStartedAt.IsZero() {
+		duration = time.Since(m.buildStartedAt)
+	} else if m.buildResult != nil {
+		duration = m.buildResult.Duration
+	}
+	content = append(content,
+		stateStyle.Render("● "+state)+"  "+styleValue.Render(m.buildMode.label()+" "+project.Name),
+		styleLabel.Render("elapsed")+"  "+styleValue.Render(formatBuildDuration(duration)),
+	)
+	if m.buildRunning {
+		content = append(content, styleKey.Render("s")+" stop   "+styleKey.Render("l")+" open live logs")
+	} else {
+		content = append(content, styleKey.Render("l")+" open logs   "+styleKey.Render("B")+" build / run again")
+	}
+	if len(m.drawer.meta) > 0 {
+		content = append(content, styleFaint.Render("command  "+m.drawer.meta[len(m.drawer.meta)-1]))
+	}
+	return panelBox("EXECUTION", content, width)
+}
 
 func (m Model) projectDetailProject() (projects.Project, bool) {
 	if m.projectDetailWorkspace {
@@ -69,11 +118,13 @@ func (m Model) projectDetailLines(width int) []string {
 		"",
 		styleTitle.Render(project.Name)+"  "+styleMuted.Render("["+string(project.Kind)+"]")+"  "+strings.Join(badges, " "),
 		styleFaint.Render(project.Path),
-		styleKey.Render("b")+" quick build   "+styleKey.Render("B")+" build / run   "+styleKey.Render("m")+" actions   "+styleKey.Render("o")+" output   "+styleKey.Render("t")+" files",
+		styleKey.Render("b")+" quick build   "+styleKey.Render("B")+" build / run   "+styleKey.Render("m")+" actions   "+styleKey.Render("l")+" logs   "+styleKey.Render("t")+" files",
 		"",
 		m.projectTabBar(),
 		"",
 	)
+	lines = append(lines, m.projectExecutionStatus(project, width-2)...)
+	lines = append(lines, "")
 	lines = append(lines, m.projectTabContent(project, width-2)...)
 	return projectWarningContent(lines, m.projectResult.Warnings, width)
 }
@@ -199,6 +250,17 @@ func (m Model) handleProjectDetailKey(message tea.KeyPressMsg) (tea.Model, tea.C
 		m.drawer.open = !m.drawer.open
 		if m.drawer.open && m.drawer.follow {
 			m.followDrawer()
+		}
+		return m, nil
+	case "l":
+		m.drawer.open = true
+		if m.drawer.follow {
+			m.followDrawer()
+		}
+		return m, nil
+	case "s":
+		if m.buildRunning {
+			m.cancelBuild()
 		}
 		return m, nil
 	case "enter":

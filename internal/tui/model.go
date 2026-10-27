@@ -199,6 +199,14 @@ type projectActionPrompt struct {
 	errorMessage string
 }
 
+type pendingProjectAction struct {
+	label           string
+	name            string
+	targetPath      string
+	args            []string
+	refreshProjects bool
+}
+
 type buildRunMode int
 
 const (
@@ -318,6 +326,7 @@ type Model struct {
 	pendingFramework     install.FrameworkFlavor
 	pendingCreatePlan    *projects.CreatePlan
 	pendingDeleteProject *projects.Project
+	pendingProjectAction *pendingProjectAction
 
 	operationRunning    bool
 	operationCancelling bool
@@ -402,6 +411,8 @@ type Model struct {
 	buildMode       buildRunMode
 	buildResult     *execution.Result
 	buildErr        error
+	buildStartedAt  time.Time
+	buildFinishedAt time.Time
 
 	spinner spinner.Model
 }
@@ -660,6 +671,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForBuild(m.buildCh)
 
+	case buildTickMsg:
+		if message.run != m.buildRun || !m.buildRunning {
+			return m, nil
+		}
+		return m, buildTick(message.run)
+
 	case projectsMsg:
 		return m.handleProjectsMsg(message)
 
@@ -787,14 +804,18 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "q":
 			m.quitConfirm = true
-		case "esc", "ctrl+c":
+		case "esc", "ctrl+c", "s":
 			m.cancelOperation()
-		case "o":
+		case "o", "l":
 			if m.buildRunning {
 				m.drawer.open = !m.drawer.open
 			}
 		}
 		return m, nil
+	}
+
+	if m.confirm != confirmNone {
+		return m.handleConfirmKey(message)
 	}
 
 	if m.projectsLoading && m.screen == ScreenProjects && key == "esc" {
@@ -815,10 +836,6 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.prompt != promptNone {
 		return m.handlePromptKey(message)
-	}
-
-	if m.confirm != confirmNone {
-		return m.handleConfirmKey(message)
 	}
 
 	if m.screen == ScreenProjects && key == "esc" && m.projectFilter != "" {

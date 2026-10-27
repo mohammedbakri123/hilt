@@ -29,6 +29,10 @@ type buildDoneMsg struct {
 	recordErr error
 }
 
+type buildTickMsg struct {
+	run int
+}
+
 type buildStreamWriter struct {
 	mu      sync.Mutex
 	ch      chan<- tea.Msg
@@ -72,6 +76,12 @@ func waitForBuild(ch <-chan tea.Msg) tea.Cmd {
 		}
 		return message
 	}
+}
+
+func buildTick(run int) tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return buildTickMsg{run: run}
+	})
 }
 
 func (m *Model) startBuild() tea.Cmd {
@@ -134,15 +144,18 @@ func (m *Model) startBuildRequest(project projects.Project, request execution.Bu
 	m.buildMode = buildRunBuild
 	m.buildResult = nil
 	m.buildErr = nil
+	m.buildStartedAt = time.Now()
+	m.buildFinishedAt = time.Time{}
 	m.drawer.open = true
 	m.drawer.follow = true
 	m.drawer.lines = nil
 	m.drawer.scroll = 0
+	m.drawer.kind = "BUILD LOGS"
 	m.drawer.status = "building · " + project.Name
 	m.drawer.meta = buildDrawerMeta(project, request, m.selection.SDKVersion)
 	m.setStatus("Building "+project.Name+"...", false)
 
-	return tea.Batch(m.buildCmd(ctx, run, request, record, ch), waitForBuild(ch))
+	return tea.Batch(m.buildCmd(ctx, run, request, record, ch), waitForBuild(ch), buildTick(run))
 }
 
 func (m *Model) startRunRequest(project projects.Project, request execution.CommandRequest) tea.Cmd {
@@ -159,15 +172,18 @@ func (m *Model) startRunRequest(project projects.Project, request execution.Comm
 	m.buildMode = buildRunRun
 	m.buildResult = nil
 	m.buildErr = nil
+	m.buildStartedAt = time.Now()
+	m.buildFinishedAt = time.Time{}
 	m.drawer.open = true
 	m.drawer.follow = true
 	m.drawer.lines = nil
 	m.drawer.scroll = 0
+	m.drawer.kind = "RUN LOGS"
 	m.drawer.status = "running · " + project.Name
 	m.drawer.meta = runDrawerMeta(project, request, m.selection.SDKVersion)
 	m.setStatus("Running "+project.Name+"...", false)
 
-	return tea.Batch(m.runCmd(ctx, run, request, ch), waitForBuild(ch))
+	return tea.Batch(m.runCmd(ctx, run, request, ch), waitForBuild(ch), buildTick(run))
 }
 
 func (m Model) buildCmd(ctx context.Context, run int, request execution.BuildRequest, record state.BuildTarget, ch chan tea.Msg) tea.Cmd {
@@ -210,6 +226,7 @@ func (m *Model) finishBuild(message buildDoneMsg) {
 	m.buildRunning = false
 	m.buildCancelling = false
 	m.buildCancel = nil
+	m.buildFinishedAt = time.Now()
 	result := message.result
 	m.buildResult = &result
 	m.buildErr = message.err
