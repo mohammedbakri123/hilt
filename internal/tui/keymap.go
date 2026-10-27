@@ -44,35 +44,36 @@ const (
 type keyContext string
 
 const (
-	ctxQuitConfirm     keyContext = "quit-confirm"
-	ctxHelp            keyContext = "help"
-	ctxOperation       keyContext = "operation"
-	ctxUpdates         keyContext = "updates"
-	ctxPromptSDKInput  keyContext = "prompt-sdk-input"
-	ctxPromptSDKList   keyContext = "prompt-sdk-list"
-	ctxPromptRuntime   keyContext = "prompt-runtime"
-	ctxConfirm         keyContext = "confirm"
-	ctxHome            keyContext = "home"
-	ctxSDKs            keyContext = "sdks"
-	ctxDiagnostics     keyContext = "diagnostics"
-	ctxProjectsLoading keyContext = "projects-loading"
-	ctxProjects        keyContext = "projects"
-	ctxProjectSplit    keyContext = "project-split"
-	ctxProjectFilter   keyContext = "project-filter"
-	ctxProjectDetail   keyContext = "project-detail"
-	ctxProjectImport   keyContext = "project-import"
-	ctxProjectCreate   keyContext = "project-create"
-	ctxProjectActions  keyContext = "project-actions"
-	ctxProjectRoot     keyContext = "project-root"
-	ctxSettings        keyContext = "settings"
-	ctxOutput          keyContext = "output"
-	ctxBuild           keyContext = "build"
-	ctxBuildOutput     keyContext = "build-output"
-	ctxBuildRunDialog  keyContext = "build-run-dialog"
-	ctxNarrow          keyContext = "narrow"
-	ctxHelpNavigation  keyContext = "help-navigation"
-	ctxHelpManaged     keyContext = "help-managed"
-	ctxHelpView        keyContext = "help-view"
+	ctxQuitConfirm         keyContext = "quit-confirm"
+	ctxHelp                keyContext = "help"
+	ctxOperation           keyContext = "operation"
+	ctxUpdates             keyContext = "updates"
+	ctxPromptSDKInput      keyContext = "prompt-sdk-input"
+	ctxPromptSDKList       keyContext = "prompt-sdk-list"
+	ctxPromptRuntime       keyContext = "prompt-runtime"
+	ctxConfirm             keyContext = "confirm"
+	ctxHome                keyContext = "home"
+	ctxSDKs                keyContext = "sdks"
+	ctxDiagnostics         keyContext = "diagnostics"
+	ctxProjectsLoading     keyContext = "projects-loading"
+	ctxProjects            keyContext = "projects"
+	ctxProjectSplit        keyContext = "project-split"
+	ctxProjectFilter       keyContext = "project-filter"
+	ctxProjectDetail       keyContext = "project-detail"
+	ctxProjectImport       keyContext = "project-import"
+	ctxProjectCreate       keyContext = "project-create"
+	ctxProjectActions      keyContext = "project-actions"
+	ctxProjectActionPrompt keyContext = "project-action-prompt"
+	ctxProjectRoot         keyContext = "project-root"
+	ctxSettings            keyContext = "settings"
+	ctxOutput              keyContext = "output"
+	ctxBuild               keyContext = "build"
+	ctxBuildOutput         keyContext = "build-output"
+	ctxBuildRunDialog      keyContext = "build-run-dialog"
+	ctxNarrow              keyContext = "narrow"
+	ctxHelpNavigation      keyContext = "help-navigation"
+	ctxHelpManaged         keyContext = "help-managed"
+	ctxHelpView            keyContext = "help-view"
 )
 
 type keyBinding struct {
@@ -246,6 +247,11 @@ var keymap = map[keyContext]keyContextSpec{
 	}},
 	ctxProjectActions: {Bindings: []keyBinding{
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "run", Compact: true},
+		{Key: "esc", Action: actionCancel, Label: "close", Compact: true},
+	}},
+	ctxProjectActionPrompt: {Bindings: []keyBinding{
+		{Key: "tab", Action: actionSwitchInput, Label: "field", Compact: true},
 		{Key: "enter", Action: actionConfirm, Label: "run", Compact: true},
 		{Key: "esc", Action: actionCancel, Label: "close", Compact: true},
 	}},

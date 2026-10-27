@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mohammedbakri123/hilt/internal/execution"
+	"github.com/mohammedbakri123/hilt/internal/projects"
 )
 
 func (m *Model) openProjectActionMenu() {
@@ -81,8 +82,18 @@ func (m *Model) startProjectAction() tea.Cmd {
 			}
 		}
 	}
-	args := append([]string{}, action.args...)
-	args = append(args, targetPath, "--nologo")
+	if action.kind != projectActionCommand {
+		if promptKind, ok := projectActionPromptFor(action.kind); ok {
+			m.openProjectActionPrompt(promptKind)
+			return nil
+		}
+	}
+	args := projectActionArguments(action, targetPath)
+	refreshProjects := action.kind == projectActionPackageAdd || action.kind == projectActionPackageRemove || action.kind == projectActionPackageUpdate
+	return m.startProjectCommand(action.label, name, targetPath, args, refreshProjects)
+}
+
+func (m *Model) startProjectCommand(label, name, targetPath string, args []string, refreshProjects bool) tea.Cmd {
 	request := execution.CommandRequest{
 		DotnetPath:       m.selection.DotnetPath,
 		ProjectPath:      targetPath,
@@ -91,10 +102,42 @@ func (m *Model) startProjectAction() tea.Cmd {
 		Environment:      m.selection.Environment(nil),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m.startOperation(fmt.Sprintf("%s %s", action.label, name), cancel)
+	m.startOperation(fmt.Sprintf("%s %s", label, name), cancel)
 	ch := make(chan tea.Msg, 256)
 	m.progressCh = ch
-	return tea.Batch(m.projectCommandCmd(ctx, action.label, request, ch), waitForProgress(ch))
+	return tea.Batch(m.projectCommandCmd(ctx, label, request, refreshProjects, ch), waitForProgress(ch))
+}
+
+func projectActionArguments(action projectAction, targetPath string) []string {
+	switch action.kind {
+	case projectActionPackageList:
+		return []string{"list", targetPath, "package"}
+	case projectActionPackageRestore:
+		return []string{"restore", targetPath, "--nologo"}
+	case projectActionEFList:
+		return []string{"ef", "migrations", "list", "--project", targetPath}
+	case projectActionEFUpdate:
+		return []string{"ef", "database", "update", "--project", targetPath}
+	case projectActionEFRemove:
+		return []string{"ef", "migrations", "remove", "--project", targetPath}
+	}
+	args := append([]string{}, action.args...)
+	return append(args, targetPath, "--nologo")
+}
+
+func projectActionPromptFor(kind projectActionKind) (projectActionPromptKind, bool) {
+	switch kind {
+	case projectActionPackageAdd:
+		return projectActionPromptPackageAdd, true
+	case projectActionPackageRemove:
+		return projectActionPromptPackageRemove, true
+	case projectActionPackageUpdate:
+		return projectActionPromptPackageUpdate, true
+	case projectActionEFAdd:
+		return projectActionPromptEFAdd, true
+	default:
+		return projectActionPromptNone, false
+	}
 }
 
 func (m Model) projectActionsForCurrent() []projectAction {
@@ -104,16 +147,34 @@ func (m Model) projectActionsForCurrent() []projectAction {
 			{label: "Test solution", args: []string{"test"}, workspace: true},
 		}
 	}
-	return projectActions
+	actions := append([]projectAction(nil), projectActions...)
+	if project, ok := m.selectedProject(); ok && projectHasEFCore(project) {
+		actions = append(actions,
+			projectAction{label: "List migrations", kind: projectActionEFList},
+			projectAction{label: "Add migration", kind: projectActionEFAdd},
+			projectAction{label: "Update database", kind: projectActionEFUpdate},
+			projectAction{label: "Remove migration", kind: projectActionEFRemove},
+		)
+	}
+	return actions
 }
 
-func (m Model) projectCommandCmd(ctx context.Context, label string, request execution.CommandRequest, ch chan tea.Msg) tea.Cmd {
+func (m Model) projectCommandCmd(ctx context.Context, label string, request execution.CommandRequest, refreshProjects bool, ch chan tea.Msg) tea.Cmd {
 	backend := m.backend
 	return func() tea.Msg {
 		defer close(ch)
 		result, err := backend.RunProjectCommand(ctx, request, progressWriter{ch}, progressWriter{ch})
-		return operationDoneMsg{kind: opProjectCommand, command: label, result: result, err: err}
+		return operationDoneMsg{kind: opProjectCommand, command: label, result: result, refreshProjects: refreshProjects, err: err}
 	}
+}
+
+func projectHasEFCore(project projects.Project) bool {
+	for _, packageReference := range project.PackageReferences {
+		if projects.IsEntityFrameworkCorePackage(packageReference.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) renderProjectActionMenu(width int) string {

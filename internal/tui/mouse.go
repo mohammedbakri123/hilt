@@ -20,7 +20,7 @@ func (m Model) handleMouseClick(message tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	if m.screen == ScreenProjects && m.projectDetailOpen {
 		return m.handleProjectDetailMouseClick(mouse)
 	}
-	if m.showHelp || m.quitConfirm || m.rootPicker.open || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.busy() {
+	if m.showHelp || m.quitConfirm || m.rootPicker.open || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.projectActionPrompt.open || m.busy() {
 		return m, nil
 	}
 
@@ -61,7 +61,7 @@ func (m Model) handleMouseWheel(message tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		m.movePicker(delta)
 		return m, nil
 	}
-	if m.showHelp || m.quitConfirm || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu {
+	if m.showHelp || m.quitConfirm || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.projectActionPrompt.open {
 		return m, nil
 	}
 	if m.drawer.open {

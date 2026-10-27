@@ -85,16 +85,17 @@ type runtimePlanMsg struct {
 }
 
 type operationDoneMsg struct {
-	kind     operationKind
-	command  string
-	result   execution.Result
-	sdk      install.Result
-	runtime  install.RuntimeResult
-	removal  install.Removal
-	update   install.UpdateResult
-	version  string
-	upToDate bool
-	err      error
+	kind            operationKind
+	command         string
+	result          execution.Result
+	sdk             install.Result
+	runtime         install.RuntimeResult
+	removal         install.Removal
+	update          install.UpdateResult
+	version         string
+	upToDate        bool
+	refreshProjects bool
+	err             error
 }
 
 type updatesMsg struct {

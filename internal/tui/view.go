@@ -99,6 +99,9 @@ func (m Model) render(width, height int) string {
 	if m.buildRunDialog.open {
 		content = overlayCentered(content, m.renderBuildRunDialog(width), width, height)
 	}
+	if m.projectActionPrompt.open {
+		content = overlayCentered(content, m.renderProjectActionPrompt(width), width, height)
+	}
 	if m.confirm != confirmNone && m.screen != ScreenSDKs {
 		content = overlayCentered(content, m.renderConfirmDialog(width), width, height)
 	}
@@ -217,6 +220,8 @@ func (m Model) footerContext() keyContext {
 		return ctxProjectCreate
 	case m.projectActionMenu:
 		return ctxProjectActions
+	case m.projectActionPrompt.open:
+		return ctxProjectActionPrompt
 	case m.prompt != promptNone:
 		return ctxPromptRuntime
 	case m.confirm != confirmNone:
