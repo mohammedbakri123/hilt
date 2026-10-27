@@ -72,6 +72,36 @@ func TestBuildArgsOmitsOptionalFlags(t *testing.T) {
 	}
 }
 
+func TestBuildArgsIncludesFrameworkAndExtraArguments(t *testing.T) {
+	args, err := BuildArgs(BuildRequest{
+		DotnetPath:  "/usr/share/dotnet/dotnet",
+		ProjectPath: "/work/Shop/Shop.csproj",
+		Framework:   "net10.0",
+		Arguments:   []string{"--no-restore", "-p:WarnAsError=true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"build", "/work/Shop/Shop.csproj", "--nologo", "--verbosity", "minimal",
+		"--framework", "net10.0", "--no-restore", "-p:WarnAsError=true",
+	}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("args = %#v, want %#v", args, want)
+	}
+}
+
+func TestRunArgs(t *testing.T) {
+	args, err := RunArgs("/work/Shop/Shop.csproj", "Release", "net9.0", []string{"--", "--port", "8080"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"run", "/work/Shop/Shop.csproj", "--nologo", "--configuration", "Release", "--framework", "net9.0", "--", "--port", "8080"}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("args = %#v, want %#v", args, want)
+	}
+}
+
 func TestBuildArgsValidation(t *testing.T) {
 	tests := []BuildRequest{
 		{ProjectPath: "/work/Shop/Shop.csproj"},

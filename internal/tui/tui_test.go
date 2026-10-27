@@ -120,6 +120,7 @@ type fakeBackend struct {
 	buildRequests       *[]execution.BuildRequest
 	buildRecords        *[]state.BuildTarget
 	buildRecordErr      error
+	commandRequests     *[]execution.CommandRequest
 
 	directories        map[string][]string
 	directoryErr       map[string]error
@@ -218,8 +219,11 @@ func (f fakeBackend) ProjectTree(context.Context, string) ([]projects.TreeEntry,
 	return []projects.TreeEntry{{Name: "App.csproj", RelativePath: "App.csproj"}}, nil
 }
 
-func (f fakeBackend) RunProjectCommand(_ context.Context, _ execution.CommandRequest, stdout, _ io.Writer) (execution.Result, error) {
+func (f fakeBackend) RunProjectCommand(_ context.Context, request execution.CommandRequest, stdout, _ io.Writer) (execution.Result, error) {
 	f.record("project-command")
+	if f.commandRequests != nil {
+		*f.commandRequests = append(*f.commandRequests, request)
+	}
 	if stdout != nil {
 		_, _ = io.WriteString(stdout, "command output\n")
 	}
@@ -2600,6 +2604,117 @@ func startBuildAndDrain(t *testing.T, model *Model, command tea.Cmd) []tea.Msg {
 	}
 	messages = append(messages, <-done)
 	return messages
+}
+
+func TestBuildRunDialogConfiguresBuild(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	backend.buildResult = execution.Result{ExitCode: 0, Started: true}
+	requests := []execution.BuildRequest{}
+	backend.buildRequests = &requests
+	model := openProjects(t, backend, 120, 40)
+
+	model = press(t, model, key('B', "B"))
+	if !model.buildRunDialog.open {
+		t.Fatal("B should open the Build / Run dialog")
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"BUILD / RUN", "Debug", "Shop", "Shop.sln", "Arguments", "Environment"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("dialog missing %q:\n%s", want, plain)
+		}
+	}
+
+	model.buildRunDialog.target = 1 // Shop.csproj, after Shop.sln.
+	model.buildRunDialog.configuration = "Release"
+	model.buildRunDialog.framework = 2 // net9.0; index zero means automatic.
+	model.buildRunDialog.arguments = `--no-restore -p:WarnAsError=true`
+	model.buildRunDialog.environment = "ASPNETCORE_ENVIRONMENT=Staging;PORT=8080"
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil || model.buildRunDialog.open {
+		t.Fatalf("enter command=%v dialogOpen=%v", command != nil, model.buildRunDialog.open)
+	}
+	model = applyMessages(t, model, startBuildAndDrain(t, &model, command))
+	if len(requests) != 1 {
+		t.Fatalf("requests = %+v", requests)
+	}
+	request := requests[0]
+	if request.ProjectPath != "/work/src/Shop/Shop.csproj" || request.Configuration != "Release" || request.Framework != "net9.0" {
+		t.Fatalf("request = %+v", request)
+	}
+	if strings.Join(request.Arguments, "\x00") != "--no-restore\x00-p:WarnAsError=true" {
+		t.Fatalf("arguments = %#v", request.Arguments)
+	}
+	if !containsEnvironment(request.Environment, "ASPNETCORE_ENVIRONMENT=Staging") || !containsEnvironment(request.Environment, "PORT=8080") {
+		t.Fatalf("environment = %#v", request.Environment)
+	}
+}
+
+func TestBuildRunDialogRunsWithArgumentsAndEnvironment(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	requests := []execution.CommandRequest{}
+	backend.commandRequests = &requests
+	model := openProjects(t, backend, 120, 40)
+	model = press(t, model, key('B', "B"))
+	model.buildRunDialog.target = 1
+	model.buildRunDialog.mode = buildRunRun
+	model.buildRunDialog.configuration = "Release"
+	model.buildRunDialog.framework = 1
+	model.buildRunDialog.arguments = `-- --name "hello world"`
+	model.buildRunDialog.environment = "DOTNET_ENVIRONMENT=Staging"
+
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("run dialog did not return a command")
+	}
+	model = applyMessages(t, model, startBuildAndDrain(t, &model, command))
+	if len(requests) != 1 {
+		t.Fatalf("requests = %+v", requests)
+	}
+	request := requests[0]
+	wantArgs := []string{"run", "/work/src/Shop/Shop.csproj", "--nologo", "--configuration", "Release", "--framework", "net10.0", "--", "--name", "hello world"}
+	if strings.Join(request.Arguments, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("arguments = %#v, want %#v", request.Arguments, wantArgs)
+	}
+	if !containsEnvironment(request.Environment, "DOTNET_ENVIRONMENT=Staging") {
+		t.Fatalf("environment = %#v", request.Environment)
+	}
+	if !strings.Contains(model.statusMessage, "Ran Shop") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+}
+
+func TestBuildRunDialogRejectsMissingSolutionMembers(t *testing.T) {
+	backend := newFakeBackend()
+	result := projectFixture()
+	result.Workspaces[0].ProjectPaths = append(result.Workspaces[0].ProjectPaths, "/work/missing/Missing.csproj")
+	backend.projectResult = result
+	model := openProjects(t, backend, 120, 40)
+	model = press(t, model, key('B', "B"))
+	model.buildRunDialog.target = 0 // the solution target
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command != nil || !model.buildRunDialog.open {
+		t.Fatalf("missing member command=%v dialogOpen=%v", command != nil, model.buildRunDialog.open)
+	}
+	if !strings.Contains(model.buildRunDialog.errorMessage, "missing project member") {
+		t.Fatalf("error = %q", model.buildRunDialog.errorMessage)
+	}
+	if !strings.Contains(ansi.Strip(model.View().Content), "missing 1") {
+		t.Fatal("missing member count not rendered")
+	}
+}
+
+func containsEnvironment(environment []string, want string) bool {
+	for _, value := range environment {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildStreamsOutputAndPersistsTarget(t *testing.T) {
