@@ -594,7 +594,14 @@ func (m Model) openWorkspaceCmd(workspace projects.Workspace) tea.Cmd {
 				return workspaceOpenedMsg{workspace: workspace, err: err}
 			}
 		}
-		return workspaceOpenedMsg{workspace: workspace, err: backend.RecordWorkspaceOpen(workspace.Path)}
+		recordErr := backend.RecordWorkspaceOpen(workspace.Path)
+		if recordErr != nil {
+			return workspaceOpenedMsg{workspace: workspace, err: recordErr}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), projectsScanTimeout)
+		defer cancel()
+		result, scanErr := backend.ScanProjects(ctx, workspace.Path, false)
+		return workspaceOpenedMsg{workspace: workspace, result: result, scanErr: scanErr}
 	}
 }
 

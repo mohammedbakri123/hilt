@@ -1502,6 +1502,11 @@ func TestProjectsMouseDoubleClickOpensSolutionDetail(t *testing.T) {
 	if backend.State().ActiveWorkspace != "/work/Shop.sln" {
 		t.Fatalf("active workspace = %q", backend.State().ActiveWorkspace)
 	}
+	updated, command = model.Update(key('b', "b"))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("b should build the selected solution")
+	}
 	plain := ansi.Strip(model.View().Content)
 	for _, want := range []string{"Solution Detail", "Shop.sln", "MEMBER PROJECTS", "Shop.Tests"} {
 		if !strings.Contains(plain, want) {

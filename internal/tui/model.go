@@ -111,7 +111,9 @@ type projectOpenedMsg struct {
 
 type workspaceOpenedMsg struct {
 	workspace projects.Workspace
+	result    projects.Result
 	err       error
+	scanErr   error
 }
 
 type projectImportMsg struct {
@@ -587,6 +589,19 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case workspaceOpenedMsg:
 		if message.err != nil {
 			m.setStatus("Could not remember solution: "+message.err.Error(), true)
+			return m, nil
+		}
+		if message.scanErr == nil {
+			if m.projectResult == nil {
+				result := message.result
+				m.projectResult = &result
+			} else {
+				result := mergeProjectResults(*m.projectResult, message.result)
+				m.projectResult = &result
+			}
+		}
+		if message.scanErr != nil {
+			m.setStatus("Active solution: "+message.workspace.Name+". Member scan failed: "+message.scanErr.Error(), true)
 			return m, nil
 		}
 		m.setStatus("Active solution: "+message.workspace.Name+".", false)
