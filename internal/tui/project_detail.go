@@ -67,6 +67,7 @@ func (m Model) projectDetailLines(width int) []string {
 		"",
 		styleTitle.Render(project.Name)+"  "+styleMuted.Render("["+string(project.Kind)+"]")+"  "+strings.Join(badges, " "),
 		styleFaint.Render(project.Path),
+		styleKey.Render("b")+" build   "+styleKey.Render("m")+" actions / run   "+styleKey.Render("o")+" output   "+styleKey.Render("t")+" files",
 		"",
 		m.projectTabBar(),
 		"",
@@ -85,6 +86,7 @@ func (m Model) solutionDetailLines(lines []string) []string {
 		"",
 		styleTitle.Render(workspace.Name)+"  "+styleMuted.Render("["+string(workspace.Kind)+"]"),
 		styleFaint.Render(workspace.Path),
+		styleKey.Render("enter")+" open a member project   "+styleKey.Render("esc")+" back",
 		"",
 		styleLabel.Render("MEMBER PROJECTS"),
 	)
