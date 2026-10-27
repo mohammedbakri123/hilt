@@ -45,9 +45,6 @@ func (m Model) projectFinderVisibleRows(height int) int {
 }
 
 func (m Model) projectFinderEntries() []projectFinderEntry {
-	if m.projectResult == nil {
-		return nil
-	}
 	entries := m.projectFinderEntriesCache
 	if entries == nil {
 		entries = m.projectFinderEntriesForPath(m.projectFinderPath)
@@ -164,7 +161,7 @@ func (m Model) renderProjectFinder(width, height int) string {
 	filterLine += styleAccent.Render("▌")
 	content := []string{
 		styleTitle.Render("OPEN PROJECT OR SOLUTION"),
-		styleMuted.Render("Browse folders and choose a .NET project or solution."),
+		styleMuted.Render("Choose a folder, then open a .NET project or solution."),
 		fitLine(styleLabel.Render("path")+"  "+pickerPath(m.projectFinderPath, innerWidth-8), innerWidth),
 		fitLine(filterLine, innerWidth),
 		finderSummary(m, len(entries)),
@@ -251,7 +248,7 @@ func (m *Model) startProjectFinder() tea.Cmd {
 	m.projectFinderCursor = 0
 	m.projectFinderScroll = 0
 	m.projectFinderEntriesCache = nil
-	m.projectFinderLoading = true
+	m.projectFinderLoading = len(m.projectFinderEntriesForPath(m.projectFinderPath)) == 0
 	m.projectFinderError = nil
 	m.projectFinderRequest++
 	m.setStatus("", false)
@@ -272,8 +269,7 @@ func (m Model) projectFinderCmd() tea.Cmd {
 		if err != nil {
 			return projectFinderMsg{request: request, path: path, err: err}
 		}
-		result, err := backend.ScanProjects(ctx, path, false)
-		return projectFinderMsg{request: request, path: path, directories: directories, result: result, err: err}
+		return projectFinderMsg{request: request, path: path, directories: directories}
 	}
 }
 
@@ -287,7 +283,7 @@ func (m Model) handleProjectFinderMsg(message projectFinderMsg) Model {
 		return m
 	}
 	m.projectFinderError = nil
-	entries := projectFinderEntriesForResult(m.projectFinderPath, message.result)
+	entries := m.projectFinderEntriesForPath(m.projectFinderPath)
 	for _, directory := range message.directories {
 		path := filepath.Clean(directory)
 		found := false
@@ -318,7 +314,7 @@ func (m *Model) navigateProjectFinder(path string) tea.Cmd {
 	m.projectFinderEntriesCache = nil
 	m.projectFinderCursor = 0
 	m.projectFinderScroll = 0
-	m.projectFinderLoading = true
+	m.projectFinderLoading = len(m.projectFinderEntriesForPath(m.projectFinderPath)) == 0
 	m.projectFinderError = nil
 	m.projectFinderRequest++
 	return m.projectFinderCmd()
