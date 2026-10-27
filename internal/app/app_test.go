@@ -475,6 +475,31 @@ func TestRecordProjectOpenPersistsState(t *testing.T) {
 	}
 }
 
+func TestRecordWorkspaceOpenPersistsState(t *testing.T) {
+	home := t.TempDir()
+	hiltHome := filepath.Join(home, "hilt")
+	t.Setenv("HOME", home)
+	t.Setenv("HILT_HOME", hiltHome)
+
+	application := New("test")
+	workspace := filepath.Join(home, "src", "Orders.slnx")
+	if err := application.RecordWorkspaceOpen(workspace); err != nil {
+		t.Fatal(err)
+	}
+	value := application.State()
+	if value.ActiveWorkspace != workspace || value.ActiveProject != "" {
+		t.Fatalf("active state = %+v", value)
+	}
+	store := state.Store{Path: application.Paths().StateFile()}
+	loaded, _, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ActiveWorkspace != workspace || loaded.ActiveProject != "" {
+		t.Fatalf("loaded state = %+v", loaded)
+	}
+}
+
 func TestNewSurfacesCorruptState(t *testing.T) {
 	home := t.TempDir()
 	hiltHome := filepath.Join(home, "hilt")

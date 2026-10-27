@@ -28,6 +28,7 @@ type Backend interface {
 	ConfigWarnings() []string
 	State() state.State
 	RecordProjectOpen(projectPath, workspacePath string) error
+	RecordWorkspaceOpen(workspacePath string) error
 	PinExternalProject(path string) error
 	UnpinExternalProject(path string) error
 	PackageManager() *platform.PackageManager

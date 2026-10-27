@@ -250,6 +250,19 @@ func (f fakeBackend) RecordProjectOpen(projectPath, workspacePath string) error 
 	return nil
 }
 
+func (f fakeBackend) RecordWorkspaceOpen(workspacePath string) error {
+	if f.stateErr != nil {
+		return f.stateErr
+	}
+	if f.state == nil {
+		return errors.New("state unavailable")
+	}
+	f.state.SchemaVersion = state.CurrentSchemaVersion
+	f.state.ActiveWorkspace = workspacePath
+	f.state.ActiveProject = ""
+	return nil
+}
+
 func (f fakeBackend) PinExternalProject(path string) error {
 	if f.state == nil {
 		return errors.New("state unavailable")
@@ -1482,8 +1495,12 @@ func TestProjectsMouseDoubleClickOpensSolutionDetail(t *testing.T) {
 	}
 	updated, command = model.Update(click)
 	model = updated.(Model)
-	if command != nil || !model.projectDetailOpen || !model.projectDetailWorkspace {
+	if command == nil || !model.projectDetailOpen || !model.projectDetailWorkspace {
 		t.Fatal("second solution click should open solution detail")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if backend.State().ActiveWorkspace != "/work/Shop.sln" {
+		t.Fatalf("active workspace = %q", backend.State().ActiveWorkspace)
 	}
 	plain := ansi.Strip(model.View().Content)
 	for _, want := range []string{"Solution Detail", "Shop.sln", "MEMBER PROJECTS", "Shop.Tests"} {
@@ -1514,8 +1531,12 @@ func TestProjectFinderMouseSelectsAndDoubleClickOpens(t *testing.T) {
 
 	updated, command = model.Update(click)
 	model = updated.(Model)
-	if command != nil || !model.projectDetailOpen || !model.projectDetailWorkspace {
+	if command == nil || !model.projectDetailOpen || !model.projectDetailWorkspace {
 		t.Fatal("second finder click should open the selected solution")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if backend.State().ActiveWorkspace != "/work/Shop.sln" {
+		t.Fatalf("active workspace = %q", backend.State().ActiveWorkspace)
 	}
 	if !strings.Contains(ansi.Strip(model.View().Content), "Solution Detail") {
 		t.Fatal("solution detail page did not open")

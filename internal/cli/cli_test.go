@@ -75,6 +75,7 @@ func (f fakeBackend) SetDefaultProjectDir(string) error { return nil }
 func (f fakeBackend) RecordProjectOpen(string, string) error {
 	return nil
 }
+func (f fakeBackend) RecordWorkspaceOpen(string) error  { return nil }
 func (f fakeBackend) PinExternalProject(string) error   { return nil }
 func (f fakeBackend) UnpinExternalProject(string) error { return nil }
 func (f fakeBackend) CreateProjects(context.Context, projects.CreatePlan, io.Writer, io.Writer) error {

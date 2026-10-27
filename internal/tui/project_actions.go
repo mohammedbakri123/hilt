@@ -11,7 +11,12 @@ import (
 )
 
 func (m *Model) openProjectActionMenu() {
-	if _, ok := m.selectedProject(); !ok {
+	if m.projectDetailWorkspace {
+		if _, ok := m.projectDetailSolution(); !ok {
+			m.setStatus("Select a solution before opening actions.", true)
+			return
+		}
+	} else if _, ok := m.selectedProject(); !ok {
 		m.setStatus("Select a project before opening actions.", true)
 		return
 	}
@@ -25,10 +30,12 @@ func (m Model) handleProjectActionKey(message tea.KeyPressMsg) (tea.Model, tea.C
 		m.projectActionMenu = false
 		return m, nil
 	case "up", "k":
-		m.projectActionCursor = (m.projectActionCursor - 1 + len(projectActions)) % len(projectActions)
+		actions := m.projectActionsForCurrent()
+		m.projectActionCursor = (m.projectActionCursor - 1 + len(actions)) % len(actions)
 		return m, nil
 	case "down", "j":
-		m.projectActionCursor = (m.projectActionCursor + 1) % len(projectActions)
+		actions := m.projectActionsForCurrent()
+		m.projectActionCursor = (m.projectActionCursor + 1) % len(actions)
 		return m, nil
 	case "enter":
 		m.projectActionMenu = false
@@ -38,22 +45,40 @@ func (m Model) handleProjectActionKey(message tea.KeyPressMsg) (tea.Model, tea.C
 }
 
 func (m *Model) startProjectAction() tea.Cmd {
-	project, ok := m.selectedProject()
-	if !ok {
-		m.setStatus("Select a project before running an action.", true)
+	actions := m.projectActionsForCurrent()
+	if len(actions) == 0 {
+		m.setStatus("Select a project or solution before running an action.", true)
 		return nil
 	}
 	if m.selection == nil || m.selection.DotnetPath == "" {
 		m.setStatus("No usable .NET SDK was selected.", true)
 		return nil
 	}
-	action := projectActions[m.projectActionCursor]
-	targetPath := project.Path
-	if action.workspace {
-		targetPath = m.workspaceFor(project.Path)
-		if targetPath == "" {
-			m.setStatus("The selected project is not part of a solution.", true)
+	action := actions[clampIndex(m.projectActionCursor, len(actions))]
+	name := ""
+	targetPath := ""
+	if m.projectDetailWorkspace {
+		workspace, ok := m.projectDetailSolution()
+		if !ok {
+			m.setStatus("Select a solution before running an action.", true)
 			return nil
+		}
+		name = workspace.Name
+		targetPath = workspace.Path
+	} else {
+		project, ok := m.selectedProject()
+		if !ok {
+			m.setStatus("Select a project before running an action.", true)
+			return nil
+		}
+		name = project.Name
+		targetPath = project.Path
+		if action.workspace {
+			targetPath = m.workspaceFor(project.Path)
+			if targetPath == "" {
+				m.setStatus("The selected project is not part of a solution.", true)
+				return nil
+			}
 		}
 	}
 	args := append([]string{}, action.args...)
@@ -66,10 +91,20 @@ func (m *Model) startProjectAction() tea.Cmd {
 		Environment:      m.selection.Environment(nil),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m.startOperation(fmt.Sprintf("%s %s", action.label, project.Name), cancel)
+	m.startOperation(fmt.Sprintf("%s %s", action.label, name), cancel)
 	ch := make(chan tea.Msg, 256)
 	m.progressCh = ch
 	return tea.Batch(m.projectCommandCmd(ctx, action.label, request, ch), waitForProgress(ch))
+}
+
+func (m Model) projectActionsForCurrent() []projectAction {
+	if m.projectDetailWorkspace {
+		return []projectAction{
+			{label: "Build solution", args: []string{"build"}, workspace: true},
+			{label: "Test solution", args: []string{"test"}, workspace: true},
+		}
+	}
+	return projectActions
 }
 
 func (m Model) projectCommandCmd(ctx context.Context, label string, request execution.CommandRequest, ch chan tea.Msg) tea.Cmd {
@@ -86,8 +121,12 @@ func (m Model) renderProjectActionMenu(width int) string {
 	if boxWidth > width-4 {
 		boxWidth = width - 4
 	}
-	content := []string{styleMuted.Render("Actions for the selected project"), ""}
-	for index, action := range projectActions {
+	target := "project"
+	if m.projectDetailWorkspace {
+		target = "solution"
+	}
+	content := []string{styleMuted.Render("Actions for the selected " + target), ""}
+	for index, action := range m.projectActionsForCurrent() {
 		marker := "  "
 		if index == m.projectActionCursor {
 			marker = styleAccent.Render("> ")

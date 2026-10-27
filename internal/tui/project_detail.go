@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -86,22 +87,24 @@ func (m Model) solutionDetailLines(lines []string) []string {
 		"",
 		styleTitle.Render(workspace.Name)+"  "+styleMuted.Render("["+string(workspace.Kind)+"]"),
 		styleFaint.Render(workspace.Path),
-		styleKey.Render("enter")+" open a member project   "+styleKey.Render("esc")+" back",
+		styleKey.Render("b")+" build solution   "+styleKey.Render("m")+" actions   "+styleKey.Render("enter")+" open member   "+styleKey.Render("esc")+" back",
 		"",
-		styleLabel.Render("MEMBER PROJECTS"),
+		styleLabel.Render(fmt.Sprintf("MEMBER PROJECTS · %d", len(workspace.ProjectPaths))),
 	)
 	if len(workspace.ProjectPaths) == 0 {
 		return append(lines, styleMuted.Render("No project entries declared by this solution."))
 	}
 	for _, path := range workspace.ProjectPaths {
 		name := path
+		status := styleWarning.Render("[missing]")
 		for _, project := range m.projectResult.Projects {
 			if project.Path == path {
 				name = project.Name
+				status = styleOK.Render("[ready]")
 				break
 			}
 		}
-		lines = append(lines, "  "+styleValue.Render(name)+"  "+styleFaint.Render(path))
+		lines = append(lines, "  "+status+" "+styleValue.Render(name)+"  "+styleFaint.Render(path))
 	}
 	return lines
 }
@@ -143,6 +146,10 @@ func (m Model) handleProjectDetailKey(message tea.KeyPressMsg) (tea.Model, tea.C
 		m.projectDetailScroll = 0
 		return m, m.startProjectTreeScan()
 	case "b":
+		if m.projectDetailWorkspace {
+			m.projectActionCursor = 0
+			return m, m.startProjectAction()
+		}
 		return m, m.startBuild()
 	case "m":
 		m.openProjectActionMenu()

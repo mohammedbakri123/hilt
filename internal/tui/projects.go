@@ -569,6 +569,7 @@ func (m *Model) openProjectDetail(project projects.Project) tea.Cmd {
 }
 
 func (m *Model) openWorkspaceDetail(workspace projects.Workspace) tea.Cmd {
+	m.adoptWorkspace(workspace)
 	m.projectDetailOpen = true
 	m.projectDetailPath = workspace.Path
 	m.projectDetailWorkspace = true
@@ -578,7 +579,23 @@ func (m *Model) openWorkspaceDetail(workspace projects.Workspace) tea.Cmd {
 	m.projectDetailScroll = 0
 	m.projectListScroll = 0
 	m.projectFocus = projectFocusDetail
-	return nil
+	return m.openWorkspaceCmd(workspace)
+}
+
+func (m Model) openWorkspaceCmd(workspace projects.Workspace) tea.Cmd {
+	backend := m.backend
+	pinExternal := m.projectIsExternal(workspace.Path)
+	return func() tea.Msg {
+		if backend == nil {
+			return workspaceOpenedMsg{workspace: workspace, err: errors.New("no backend configured")}
+		}
+		if pinExternal {
+			if err := backend.PinExternalProject(workspace.Path); err != nil {
+				return workspaceOpenedMsg{workspace: workspace, err: err}
+			}
+		}
+		return workspaceOpenedMsg{workspace: workspace, err: backend.RecordWorkspaceOpen(workspace.Path)}
+	}
 }
 
 func (m Model) workspaceFor(projectPath string) string {
@@ -632,6 +649,19 @@ func (m *Model) adoptProject(project projects.Project) {
 		Kind:         projects.KindProject,
 		ProjectPaths: []string{project.Path},
 	})
+}
+
+func (m *Model) adoptWorkspace(workspace projects.Workspace) {
+	if m.projectResult == nil {
+		result := projects.Result{Root: m.projectWorkspaceRoot()}
+		m.projectResult = &result
+	}
+	for _, existing := range m.projectResult.Workspaces {
+		if existing.Path == workspace.Path {
+			return
+		}
+	}
+	m.projectResult.Workspaces = append(m.projectResult.Workspaces, workspace)
 }
 
 func (m *Model) restoreProjectSelection(path string) {

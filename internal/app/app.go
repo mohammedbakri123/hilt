@@ -183,6 +183,26 @@ func (a *App) RecordProjectOpen(projectPath, workspacePath string) error {
 	return nil
 }
 
+// RecordWorkspaceOpen makes a solution or solution filter the active
+// workspace. The workspace file is referenced, never copied.
+func (a *App) RecordWorkspaceOpen(workspacePath string) error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+
+	current := a.state
+	current.SchemaVersion = state.CurrentSchemaVersion
+	current.ActiveWorkspace = workspacePath
+	current.ActiveProject = ""
+	if current.PinnedExternalProjects == nil {
+		current.PinnedExternalProjects = []string{}
+	}
+	if err := a.stateStore.Save(current); err != nil {
+		return fmt.Errorf("save workspace state: %w", err)
+	}
+	a.state = current
+	return nil
+}
+
 // PinExternalProject validates and remembers a project source outside the
 // configured default root. The source may be a directory, project, or solution
 // file and is never copied into Hilt's home.

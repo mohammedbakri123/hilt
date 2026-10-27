@@ -30,6 +30,7 @@ type Backend interface {
 	ConfigWarnings() []string
 	State() state.State
 	RecordProjectOpen(projectPath, workspacePath string) error
+	RecordWorkspaceOpen(workspacePath string) error
 	PinExternalProject(path string) error
 	UnpinExternalProject(path string) error
 	PackageManager() *platform.PackageManager
@@ -106,6 +107,11 @@ type doctorMsg struct {
 type projectOpenedMsg struct {
 	project projects.Project
 	err     error
+}
+
+type workspaceOpenedMsg struct {
+	workspace projects.Workspace
+	err       error
 }
 
 type projectImportMsg struct {
@@ -576,6 +582,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setStatus("Active project: "+message.project.Name+".", false)
+		return m, nil
+
+	case workspaceOpenedMsg:
+		if message.err != nil {
+			m.setStatus("Could not remember solution: "+message.err.Error(), true)
+			return m, nil
+		}
+		m.setStatus("Active solution: "+message.workspace.Name+".", false)
 		return m, nil
 
 	case doctorMsg:
