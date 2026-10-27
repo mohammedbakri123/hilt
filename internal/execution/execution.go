@@ -20,6 +20,8 @@ type BuildRequest struct {
 	ProjectPath      string
 	WorkingDirectory string
 	Configuration    string
+	Framework        string
+	Arguments        []string
 	NoRestore        bool
 	Environment      []string
 }
@@ -102,7 +104,28 @@ func BuildArgs(request BuildRequest) ([]string, error) {
 	if request.NoRestore {
 		args = append(args, "--no-restore")
 	}
+	if framework := strings.TrimSpace(request.Framework); framework != "" {
+		args = append(args, "--framework", framework)
+	}
+	args = append(args, request.Arguments...)
 	return args, nil
+}
+
+// RunArgs returns the deterministic argument list for dotnet run. Extra
+// arguments are appended after the options Hilt owns, so users can pass both
+// dotnet run options and application arguments through the dialog.
+func RunArgs(projectPath, configuration, framework string, extra []string) ([]string, error) {
+	if strings.TrimSpace(projectPath) == "" {
+		return nil, fmt.Errorf("project path is required")
+	}
+	args := []string{"run", projectPath, "--nologo"}
+	if configuration = strings.TrimSpace(configuration); configuration != "" {
+		args = append(args, "--configuration", configuration)
+	}
+	if framework = strings.TrimSpace(framework); framework != "" {
+		args = append(args, "--framework", framework)
+	}
+	return append(args, extra...), nil
 }
 
 // Build runs a build request and streams combined stdout and stderr to the
