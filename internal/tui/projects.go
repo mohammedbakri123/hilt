@@ -224,6 +224,9 @@ func (m Model) handleProjectsMsg(message projectsMsg) (tea.Model, tea.Cmd) {
 	m.projectsErr = nil
 	m.projectsLoaded = true
 	m.restoreProjectSelection(previous)
+	if m.projectFiltering {
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor, len(m.filteredProjects()))
+	}
 	m.ensureProjectSelectionVisible()
 	m.clampScroll()
 	return m, nil
@@ -373,27 +376,77 @@ func (m *Model) setProjectFilter(filter string) {
 func (m Model) handleProjectFilterKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "esc":
+		origin := m.projectFinderOrigin
 		m.projectFiltering = false
 		m.setProjectFilter("")
-		m.setStatus("Project filter cleared.", false)
+		m.restoreProjectSelection(origin)
+		m.projectFinderCursor = 0
+		m.projectFinderOrigin = ""
 		return m, nil
 	case "enter", "tab":
-		m.projectFiltering = false
+		return m, m.openProjectFromFinder()
+	case "up", "k":
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor-1, len(m.filteredProjects()))
+		return m, nil
+	case "down", "j":
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor+1, len(m.filteredProjects()))
+		return m, nil
+	case "pgup":
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor-6, len(m.filteredProjects()))
+		return m, nil
+	case "pgdown":
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor+6, len(m.filteredProjects()))
 		return m, nil
 	case "backspace":
 		runes := []rune(m.projectFilter)
 		if len(runes) > 0 {
 			m.setProjectFilter(string(runes[:len(runes)-1]))
+			m.projectFinderCursor = 0
 		}
 		return m, nil
 	case "ctrl+u":
 		m.setProjectFilter("")
+		m.projectFinderCursor = 0
 		return m, nil
 	}
 	if message.Text != "" && !message.Mod.Contains(tea.ModCtrl) && !message.Mod.Contains(tea.ModAlt) {
 		m.setProjectFilter(m.projectFilter + message.Text)
+		m.projectFinderCursor = 0
 	}
 	return m, nil
+}
+
+func (m *Model) startProjectFinder() {
+	m.lastProjectClickPath = ""
+	m.lastProjectClickAt = time.Time{}
+	m.projectFinderOrigin = ""
+	if selected, ok := m.selectedProject(); ok {
+		m.projectFinderOrigin = selected.Path
+	}
+	m.projectFiltering = true
+	m.setProjectFilter("")
+	m.projectFinderCursor = m.projectCursor
+	if len(m.filteredProjects()) > 0 {
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor, len(m.filteredProjects()))
+	} else {
+		m.projectFinderCursor = 0
+	}
+	m.setStatus("", false)
+}
+
+func (m *Model) openProjectFromFinder() tea.Cmd {
+	projectsList := m.filteredProjects()
+	if len(projectsList) == 0 {
+		m.setStatus("No matching projects. Try a name, path, framework, or SDK.", true)
+		return nil
+	}
+	project := projectsList[clampIndex(m.projectFinderCursor, len(projectsList))]
+	m.projectFiltering = false
+	m.setProjectFilter("")
+	m.restoreProjectSelection(project.Path)
+	m.projectFinderCursor = 0
+	m.projectFinderOrigin = ""
+	return m.openProjectCmd(project)
 }
 
 func (m Model) projectIsExternal(path string) bool {

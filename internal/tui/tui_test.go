@@ -1458,6 +1458,53 @@ func TestProjectsMouseDoubleClickOpensProject(t *testing.T) {
 	}
 }
 
+func TestProjectFinderMouseSelectsAndDoubleClickOpens(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	model = press(t, model, key('/', "/"))
+	_, _, left, rowsTop, _ := model.projectFinderLayout(100, 30)
+	click := tea.MouseClickMsg{X: left + 8, Y: rowsTop + 1, Button: tea.MouseLeft}
+
+	updated, command := model.Update(click)
+	model = updated.(Model)
+	if command != nil {
+		t.Fatal("first finder click should only select")
+	}
+	selected, ok := model.selectedProject()
+	if !ok || selected.Name != "Shop.Tests" {
+		t.Fatalf("finder mouse selected = %+v, want Shop.Tests", selected)
+	}
+
+	updated, command = model.Update(click)
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("second finder click should open the selected project")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if got := backend.State().ActiveProject; got != "/work/tests/Shop.Tests/Shop.Tests.csproj" {
+		t.Fatalf("active project = %q", got)
+	}
+}
+
+func TestProjectFinderFitsLayouts(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{40, 12}, {60, 20}, {80, 24}, {160, 48}} {
+		backend := newFakeBackend()
+		backend.projectResult = projectFixture()
+		model := openProjects(t, backend, size.width, size.height)
+		model = press(t, model, key('/', "/"))
+		lines := strings.Split(model.View().Content, "\n")
+		if len(lines) != size.height {
+			t.Errorf("%dx%d: got %d lines, want %d", size.width, size.height, len(lines), size.height)
+		}
+		for index, line := range lines {
+			if width := ansi.StringWidth(line); width > size.width {
+				t.Errorf("%dx%d: line %d width %d: %q", size.width, size.height, index, width, line)
+			}
+		}
+	}
+}
+
 func TestViewEnablesCellMouseMode(t *testing.T) {
 	model := loadedModel(t, newFakeBackend(), 100, 30)
 	if got := model.View().MouseMode; got != tea.MouseModeCellMotion {
@@ -2144,9 +2191,9 @@ func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
 		t.Fatalf("selection after filter = %+v", selected)
 	}
 	plain := ansi.Strip(model.View().Content)
-	for _, want := range []string{"filter: /shop", "2/2 projects", "Shop.Tests"} {
+	for _, want := range []string{"FIND & OPEN PROJECT", "2 matches", "Shop.Tests"} {
 		if !strings.Contains(plain, want) {
-			t.Errorf("filtered list missing %q:\n%s", want, plain)
+			t.Errorf("finder missing %q:\n%s", want, plain)
 		}
 	}
 
@@ -2155,7 +2202,7 @@ func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
 		model = press(t, model, key(character, string(character)))
 	}
 	plain = ansi.Strip(model.View().Content)
-	for _, want := range []string{`No projects match "zzz".`, "Press esc to clear"} {
+	for _, want := range []string{"0 matches", "No matches. Try a project name, path, framework, or SDK."} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("no-results state missing %q:\n%s", want, plain)
 		}
@@ -2166,26 +2213,30 @@ func TestProjectsFilterSelectionAndEmptyState(t *testing.T) {
 
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if model.projectFilter != "" || model.projectFiltering {
-		t.Fatalf("esc did not clear the filter: %q filtering=%v", model.projectFilter, model.projectFiltering)
+		t.Fatalf("esc did not close the finder: %q filtering=%v", model.projectFilter, model.projectFiltering)
 	}
-	if _, ok := model.selectedProject(); !ok {
-		t.Fatal("clearing the filter should restore the project list")
+	if selected, ok := model.selectedProject(); !ok || selected.Name != "Shop.Tests" {
+		t.Fatalf("clearing the finder should restore the original selection: %+v", selected)
 	}
 
 	model = press(t, model, key('/', "/"))
 	for _, character := range "tests" {
 		model = press(t, model, key(character, string(character)))
 	}
-	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
 	if model.projectFiltering {
-		t.Fatal("enter should leave filter input")
+		t.Fatal("enter should close the finder")
 	}
-	if model.projectFilter != "tests" {
-		t.Fatalf("enter cleared the filter: %q", model.projectFilter)
-	}
-	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if model.projectFilter != "" {
-		t.Fatalf("esc did not clear the applied filter: %q", model.projectFilter)
+		t.Fatalf("enter should clear the transient query: %q", model.projectFilter)
+	}
+	if command == nil {
+		t.Fatal("enter should return an open-project command")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	if !strings.Contains(ansi.Strip(model.View().Content), "Active project: Shop.Tests") {
+		t.Fatal("opening from the finder did not activate Shop.Tests")
 	}
 }
 

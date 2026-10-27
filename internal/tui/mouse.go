@@ -14,6 +14,9 @@ const headerLineCount = 2
 
 func (m Model) handleMouseClick(message tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	mouse := message.Mouse()
+	if m.screen == ScreenProjects && m.projectFiltering {
+		return m.handleProjectFinderMouseClick(mouse)
+	}
 	if m.showHelp || m.quitConfirm || m.rootPicker.open || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.busy() {
 		return m, nil
 	}
@@ -40,6 +43,10 @@ func (m Model) handleMouseWheel(message tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 	if mouse.Button == tea.MouseWheelUp {
 		delta = -delta
 	} else if mouse.Button != tea.MouseWheelDown {
+		return m, nil
+	}
+	if m.screen == ScreenProjects && m.projectFiltering {
+		m.projectFinderCursor = clampIndex(m.projectFinderCursor+delta, len(m.filteredProjects()))
 		return m, nil
 	}
 

@@ -210,9 +210,10 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
 	ctxProjectFilter: {Bindings: []keyBinding{
-		{Key: "type", Action: actionFilter, Label: "filter", Compact: true},
-		{Key: "enter", Action: actionConfirm, Label: "keep", Compact: true},
-		{Key: "esc", Action: actionCancel, Label: "clear", Compact: true},
+		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
+		{Key: "type", Action: actionFilter, Label: "find", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "open", Compact: true},
+		{Key: "esc", Action: actionCancel, Label: "close", Compact: true},
 	}},
 	ctxProjectImport: {Bindings: []keyBinding{
 		{Key: "enter", Action: actionConfirm, Label: "import", Compact: true},

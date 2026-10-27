@@ -169,10 +169,10 @@ hilt projects list --json
 | `m` | Projects | Open project actions (build, clean, restore, test, run) |
 | `n` | Projects | Create a project from a Hilt or `dotnet new` preset |
 | `x` | Projects | Delete the selected `.csproj` file after confirmation (source preserved) |
-| `/` | Projects | Filter project list |
+| `/` / `f` | Projects | Open Find & Open dialog; search by name, path, framework, or SDK |
 | `,` / `.` | Projects | Switch active project detail tabs |
 | `tab` | Projects / SDKs| Toggle pane focus / switch between SDKs and Runtimes |
-| Mouse | Projects | Click navigation, project rows, and detail tabs; wheel scrolls the focused pane |
+| Mouse | Projects | Click navigation, project rows, detail tabs, and Find & Open results; double-click opens |
 | `i` | SDKs / Home | Install managed SDK or runtime |
 | `u` | SDKs | Check for updates / apply update to selected item |
 | `x` | SDKs | Remove selected managed version (guarded with confirmation) |

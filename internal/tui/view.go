@@ -84,6 +84,9 @@ func (m Model) render(width, height int) string {
 	if m.rootPicker.open {
 		content = overlayCentered(content, m.renderProjectRootPicker(width, height), width, height)
 	}
+	if m.screen == ScreenProjects && m.projectFiltering {
+		content = overlayCentered(content, m.renderProjectFinder(width, height), width, height)
+	}
 	if m.prompt == promptImportPath {
 		content = overlayCentered(content, m.renderProjectImportPrompt(width), width, height)
 	}

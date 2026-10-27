@@ -246,6 +246,8 @@ type Model struct {
 	projectExpanded      map[string]bool
 	projectFilter        string
 	projectFiltering     bool
+	projectFinderCursor  int
+	projectFinderOrigin  string
 	projectCancel        context.CancelFunc
 	projectRequest       int
 	projectTreeRequest   int
@@ -778,7 +780,7 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.screen == ScreenProjects {
 		if key == "/" || key == "f" {
-			m.projectFiltering = true
+			m.startProjectFinder()
 			return m, nil
 		}
 		if key == "tab" || key == "shift+tab" {
