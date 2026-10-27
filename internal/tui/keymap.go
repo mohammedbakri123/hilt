@@ -59,6 +59,7 @@ const (
 	ctxProjects        keyContext = "projects"
 	ctxProjectSplit    keyContext = "project-split"
 	ctxProjectFilter   keyContext = "project-filter"
+	ctxProjectDetail   keyContext = "project-detail"
 	ctxProjectImport   keyContext = "project-import"
 	ctxProjectCreate   keyContext = "project-create"
 	ctxProjectActions  keyContext = "project-actions"
@@ -159,17 +160,16 @@ var keymap = map[keyContext]keyContextSpec{
 	ctxProjects: {CompactWidth: 90, Bindings: []keyBinding{
 		{Key: "[/]", Action: actionNavigate, Label: "nav"},
 		{Key: "↑/↓", Action: actionSelect, Label: "sel", Compact: true},
-		{Key: "enter", Action: actionConfirm, Label: "o", Compact: true},
+		{Key: "enter", Action: actionConfirm, Label: "open", Compact: true},
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "/", Action: actionFilter, Label: "f", Compact: true},
 		{Key: "p", Action: actionChooseRoot, Label: "d", Compact: true},
 		{Key: "a", Action: actionChooseRoot, Label: "+"},
-		{Key: "e", Action: actionToggleTree, Label: "tree"},
+		{Key: "e", Action: actionToggleTree, Label: "fold"},
 		{Key: "n", Action: actionConfirm, Label: "+"},
 		{Key: "x", Action: actionRemove, Label: "rm"},
 		{Key: "m", Action: actionConfirm, Label: "+"},
-		{Key: ", .", Action: actionProjectTab, Label: "tab"},
 		{Key: "pgup/dn", Action: actionScroll, Label: "scroll"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
@@ -214,6 +214,17 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "type", Action: actionFilter, Label: "find", Compact: true},
 		{Key: "enter", Action: actionConfirm, Label: "open", Compact: true},
 		{Key: "esc", Action: actionCancel, Label: "close", Compact: true},
+	}},
+	ctxProjectDetail: {CompactWidth: 96, Bindings: []keyBinding{
+		{Key: "esc", Action: actionCancel, Label: "back", Compact: true},
+		{Key: "↑/↓", Action: actionScroll, Label: "scroll", Compact: true},
+		{Key: ", .", Action: actionProjectTab, Label: "tabs", Compact: true},
+		{Key: "t", Action: actionToggleTree, Label: "files", Compact: true},
+		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
+		{Key: "m", Action: actionConfirm, Label: "actions", Compact: true},
+		{Key: "o", Action: actionToggleOutput, Label: "output", Compact: true},
+		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
+		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
 	ctxProjectImport: {Bindings: []keyBinding{
 		{Key: "enter", Action: actionConfirm, Label: "import", Compact: true},

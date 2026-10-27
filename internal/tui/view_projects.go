@@ -8,6 +8,9 @@ import (
 )
 
 func (m Model) projectLines(width int) []string {
+	if m.projectDetailOpen {
+		return m.projectDetailLines(width)
+	}
 	lines := sectionHeader("Projects & Solutions", width)
 	if m.backend == nil {
 		return append(lines, "No backend configured.")
@@ -26,7 +29,7 @@ func (m Model) projectLines(width int) []string {
 
 	result := m.projectResult
 	projectList := m.filteredProjects()
-	summary := fmt.Sprintf("  %d workspaces  ·  %d projects", len(result.Workspaces), len(projectList))
+	summary := fmt.Sprintf("  %d solutions  ·  %d projects", len(result.Workspaces), len(projectList))
 	if pinned := len(m.backend.State().PinnedExternalProjects); pinned > 0 {
 		summary += fmt.Sprintf("  ·  %d imported", pinned)
 	}
@@ -46,56 +49,13 @@ func (m Model) projectLines(width int) []string {
 	if root := m.projectWorkspaceRoot(); root != "" {
 		summary += "  ·  " + styleMuted.Render("workspace "+pickerPath(root, width-24))
 	}
-	if m.projectSplit() {
-		summary += "  ·  " + styleMuted.Render("focus: "+m.focusLabel())
-	}
 	if result.Root != "" {
 		summary += "  ·  " + styleMuted.Render("root "+pickerPath(result.Root, width-12))
 	}
 	lines = append(lines, styleMuted.Render(summary))
-
-	if m.projectSplit() {
-		listWidth, detailWidth := projectPaneWidths(width)
-		listContent, _ := m.projectListContent()
-		detailContent := []string{styleMuted.Render("Select a project to see its overview.")}
-		detailContent = m.projectDetailBody(detailWidth - 4)
-		height := m.projectPaneHeight()
-		listPane := panelWindow("PROJECTS", listContent, listWidth, height, m.projectListScroll, m.projectFocus == projectFocusList)
-		detailPane := panelWindow(projectTabs[m.projectTab].title, detailContent, detailWidth, height, m.projectDetailScroll, m.projectFocus == projectFocusDetail)
-		return append(lines, joinPanes(listPane, detailPane)...)
-	}
-
-	lines = append(lines, "", styleLabel.Render("WORKSPACES"))
-	if len(result.Workspaces) == 0 {
-		lines = append(lines, "  "+styleMuted.Render("none found"))
-	}
-	for _, workspace := range result.Workspaces {
-		line := "  " + styleValue.Render(workspace.Name) + "  " +
-			styleMuted.Render("["+string(workspace.Kind)+"] "+workspace.Path)
-		line += styleFaint.Render(fmt.Sprintf("  (%d projects)", len(workspace.ProjectPaths)))
-		lines = append(lines, line)
-	}
-
-	lines = append(lines, "", styleLabel.Render("PROJECTS"))
-	if len(projectList) == 0 {
-		if m.projectFilter != "" {
-			lines = append(lines, "  "+styleMuted.Render(fmt.Sprintf("No projects match %q.", m.projectFilter)))
-			lines = append(lines, "  "+styleMuted.Render("Press esc to clear the filter or / to edit it."))
-		} else {
-			lines = append(lines, "  "+styleMuted.Render("No .csproj files found."))
-		}
-	} else {
-		lines = append(lines, "    "+styleFaint.Render(fmt.Sprintf("%-22s %-28s %s", "NAME", "FRAMEWORKS", "PATH")))
-	}
-	for index, project := range projectList {
-		lines = append(lines, m.projectRow(project, index, false))
-	}
-
-	if _, ok := m.selectedProject(); ok {
-		lines = append(lines, "")
-		lines = append(lines, m.projectDetailPanel(width)...)
-	}
-
+	listContent, _ := m.projectListContent()
+	lines = append(lines, "")
+	lines = append(lines, listContent...)
 	lines = projectWarningContent(lines, result.Warnings, width)
 	return lines
 }
@@ -154,7 +114,7 @@ func (m Model) projectListContent() ([]string, int) {
 			marker = "▸"
 		}
 		line := "  " + styleAccent.Render(marker) + " " + styleValue.Render(workspace.Name) + "  " +
-			styleMuted.Render("["+string(workspace.Kind)+"]")
+			styleMuted.Render("["+string(workspace.Kind)+"] "+workspace.Path)
 		line += styleFaint.Render(fmt.Sprintf("  (%d projects)", len(workspace.ProjectPaths)))
 		lines = append(lines, line)
 		for _, project := range projectList {
@@ -169,7 +129,7 @@ func (m Model) projectListContent() ([]string, int) {
 			if !containsPath(workspace.ProjectPaths, project.Path) {
 				continue
 			}
-			lines = append(lines, "    "+m.projectRow(project, index, true))
+			lines = append(lines, "    "+m.projectRow(project, index, false))
 		}
 	}
 	lines = append(lines, "", styleLabel.Render("INDEPENDENT PROJECTS"))
@@ -203,7 +163,7 @@ func (m Model) projectListContent() ([]string, int) {
 		if index == m.projectCursor {
 			selectedLine = len(lines)
 		}
-		lines = append(lines, "  "+m.projectRow(project, index, true))
+		lines = append(lines, "  "+m.projectRow(project, index, false))
 	}
 	return lines, selectedLine
 }
@@ -253,6 +213,31 @@ func (m Model) projectListProjectAt(target int) (int, bool) {
 			return projectIndex, true
 		}
 		line++
+	}
+	return 0, false
+}
+
+func (m Model) projectListWorkspaceAt(target int) (int, bool) {
+	if m.projectResult == nil || target < 0 {
+		return 0, false
+	}
+	line := 2
+	if sources := m.backend.State().PinnedExternalProjects; len(sources) > 0 {
+		line += 2 + len(sources)
+	}
+	for index := range m.projectResult.Workspaces {
+		if line == target {
+			return index, true
+		}
+		line++
+		if !m.workspaceExpanded(m.projectResult.Workspaces[index].Path) {
+			continue
+		}
+		for _, project := range m.filteredProjects() {
+			if containsPath(m.projectResult.Workspaces[index].ProjectPaths, project.Path) {
+				line++
+			}
+		}
 	}
 	return 0, false
 }
@@ -359,7 +344,7 @@ func (m Model) projectTabBar() string {
 		}
 		parts = append(parts, styleMuted.Render(tab.label))
 	}
-	return "  " + strings.Join(parts, "  ") + "  " + styleFaint.Render("· enter/double-click opens")
+	return "  " + strings.Join(parts, "  ") + "  " + styleFaint.Render("· esc returns to projects")
 }
 
 func (m Model) projectTabContent(project projects.Project, width int) []string {

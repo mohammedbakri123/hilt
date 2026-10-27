@@ -17,6 +17,9 @@ func (m Model) handleMouseClick(message tea.MouseClickMsg) (tea.Model, tea.Cmd) 
 	if m.screen == ScreenProjects && m.projectFiltering {
 		return m.handleProjectFinderMouseClick(mouse)
 	}
+	if m.screen == ScreenProjects && m.projectDetailOpen {
+		return m.handleProjectDetailMouseClick(mouse)
+	}
 	if m.showHelp || m.quitConfirm || m.rootPicker.open || m.prompt != promptNone || m.confirm != confirmNone || m.createWizard.open || m.projectActionMenu || m.busy() {
 		return m, nil
 	}
@@ -47,6 +50,10 @@ func (m Model) handleMouseWheel(message tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 	}
 	if m.screen == ScreenProjects && m.projectFiltering {
 		m.projectFinderCursor = clampIndex(m.projectFinderCursor+delta, len(m.filteredProjects()))
+		return m, nil
+	}
+	if m.screen == ScreenProjects && m.projectDetailOpen {
+		m.scrollBy(delta)
 		return m, nil
 	}
 
@@ -120,13 +127,16 @@ func (m Model) handleProjectMouseClick(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	line := mouse.Y - headerLineCount + m.projectScroll
-	lines := m.projectLines(m.contentWidth())
+	line := mouse.Y - headerLineCount + m.projectScroll - 5
+	listLines, _ := m.projectListContent()
+	if workspaceIndex, ok := m.projectListWorkspaceAt(line); ok && m.projectResult != nil {
+		return m, m.projectWorkspaceClickCommand(m.projectResult.Workspaces[workspaceIndex])
+	}
 	for index, project := range m.filteredProjects() {
-		if line < 0 || line >= len(lines) {
+		if line < 0 || line >= len(listLines) {
 			break
 		}
-		plain := ansi.Strip(lines[line])
+		plain := ansi.Strip(listLines[line])
 		if strings.Contains(plain, project.Name) && strings.Contains(plain, project.Path) {
 			m.projectCursor = index
 			m.projectDetailScroll = 0
@@ -145,11 +155,24 @@ func (m *Model) projectClickCommand(project projects.Project) tea.Cmd {
 	if m.lastProjectClickPath == project.Path && !m.lastProjectClickAt.IsZero() && now.Sub(m.lastProjectClickAt) <= 450*time.Millisecond {
 		m.lastProjectClickPath = ""
 		m.lastProjectClickAt = time.Time{}
-		return m.openProjectCmd(project)
+		return m.openProjectDetail(project)
 	}
 	m.lastProjectClickPath = project.Path
 	m.lastProjectClickAt = now
 	return m.startProjectTreeScan()
+}
+
+func (m *Model) projectWorkspaceClickCommand(workspace projects.Workspace) tea.Cmd {
+	now := time.Now()
+	path := "workspace:" + workspace.Path
+	if m.lastProjectClickPath == path && !m.lastProjectClickAt.IsZero() && now.Sub(m.lastProjectClickAt) <= 450*time.Millisecond {
+		m.lastProjectClickPath = ""
+		m.lastProjectClickAt = time.Time{}
+		return m.openWorkspaceDetail(workspace)
+	}
+	m.lastProjectClickPath = path
+	m.lastProjectClickAt = now
+	return nil
 }
 
 func (m Model) projectPanelTop() int {

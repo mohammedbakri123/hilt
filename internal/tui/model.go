@@ -233,34 +233,37 @@ type Model struct {
 	progressDone        int64
 	progressTotal       int64
 
-	projectsLoading      bool
-	projectsLoaded       bool
-	projectResult        *projects.Result
-	projectsErr          error
-	projectCursor        int
-	projectScroll        int
-	projectListScroll    int
-	projectDetailScroll  int
-	projectFocus         projectFocus
-	projectTab           projectTab
-	projectExpanded      map[string]bool
-	projectFilter        string
-	projectFiltering     bool
-	projectFinderCursor  int
-	projectFinderOrigin  string
-	projectCancel        context.CancelFunc
-	projectRequest       int
-	projectTreeRequest   int
-	projectTreePath      string
-	projectTree          []projects.TreeEntry
-	projectTreeLoading   bool
-	projectTreeErr       error
-	projectTreeCancel    context.CancelFunc
-	lastProjectClickPath string
-	lastProjectClickAt   time.Time
-	createWizard         projectCreateWizard
-	projectActionMenu    bool
-	projectActionCursor  int
+	projectsLoading        bool
+	projectsLoaded         bool
+	projectResult          *projects.Result
+	projectsErr            error
+	projectCursor          int
+	projectScroll          int
+	projectListScroll      int
+	projectDetailScroll    int
+	projectFocus           projectFocus
+	projectTab             projectTab
+	projectExpanded        map[string]bool
+	projectFilter          string
+	projectFiltering       bool
+	projectFinderCursor    int
+	projectFinderOrigin    string
+	projectDetailOpen      bool
+	projectDetailPath      string
+	projectDetailWorkspace bool
+	projectCancel          context.CancelFunc
+	projectRequest         int
+	projectTreeRequest     int
+	projectTreePath        string
+	projectTree            []projects.TreeEntry
+	projectTreeLoading     bool
+	projectTreeErr         error
+	projectTreeCancel      context.CancelFunc
+	lastProjectClickPath   string
+	lastProjectClickAt     time.Time
+	createWizard           projectCreateWizard
+	projectActionMenu      bool
+	projectActionCursor    int
 
 	rootPicker projectRootPicker
 	// projectRootOverride is session-local and is set only after the user
@@ -657,6 +660,9 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.screen == ScreenProjects && m.projectFiltering {
 		return m.handleProjectFilterKey(message)
 	}
+	if m.screen == ScreenProjects && m.projectDetailOpen {
+		return m.handleProjectDetailKey(message)
+	}
 
 	if m.createWizard.open {
 		return m.handleProjectCreateKey(message)
@@ -814,16 +820,15 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "b":
 			return m, m.startBuild()
-		case ",":
-			m.moveProjectTab(-1)
-			return m, m.startProjectTreeScan()
-		case ".":
-			m.moveProjectTab(1)
-			return m, m.startProjectTreeScan()
 		case "t":
+			project, ok := m.selectedProject()
+			if !ok {
+				m.setStatus("Select a project first.", false)
+				return m, nil
+			}
 			m.projectTab = projectTabTree
-			m.projectDetailScroll = 0
-			return m, m.startProjectTreeScan()
+			openCommand := m.openProjectDetail(project)
+			return m, tea.Batch(openCommand, m.startProjectTreeScan())
 		case "up", "k":
 			if m.projectSplit() && m.projectFocus == projectFocusDetail {
 				m.scrollFocusedBy(-1)
@@ -844,7 +849,7 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.setStatus("Select a project first.", false)
 				return m, nil
 			}
-			return m, m.openProjectCmd(project)
+			return m, m.openProjectDetail(project)
 		}
 	}
 
@@ -1075,6 +1080,11 @@ func (m *Model) navigate(target Screen) tea.Cmd {
 	}
 	m.screen = target
 	m.cursor = int(target)
+	if target != ScreenProjects {
+		m.projectDetailOpen = false
+		m.projectDetailPath = ""
+		m.projectDetailWorkspace = false
+	}
 
 	if target == ScreenDiagnostics && m.report == nil && !m.loadingDoctor {
 		m.loadingDoctor = true
@@ -1095,6 +1105,9 @@ func (m Model) scrollOffset() int {
 	case ScreenDiagnostics:
 		return m.diagScroll
 	case ScreenProjects:
+		if m.projectDetailOpen {
+			return m.projectDetailScroll
+		}
 		return m.projectScroll
 	default:
 		return m.sdkScroll
@@ -1113,7 +1126,11 @@ func (m *Model) setScroll(value int) {
 	case ScreenDiagnostics:
 		m.diagScroll = value
 	case ScreenProjects:
-		m.projectScroll = value
+		if m.projectDetailOpen {
+			m.projectDetailScroll = value
+		} else {
+			m.projectScroll = value
+		}
 	default:
 		m.sdkScroll = value
 	}

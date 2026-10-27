@@ -42,8 +42,8 @@ var projectTabs = []struct {
 }{
 	{title: "OVERVIEW", label: "Overview"},
 	{title: "PACKAGES", label: "Packages"},
-	{title: "TREE", label: "Tree"},
-	{title: "DATA", label: "Data"},
+	{title: "FILES / TREE", label: "Files"},
+	{title: "EF CORE", label: "EF"},
 	{title: "OUTPUT", label: "Output"},
 }
 
@@ -446,7 +446,7 @@ func (m *Model) openProjectFromFinder() tea.Cmd {
 	m.restoreProjectSelection(project.Path)
 	m.projectFinderCursor = 0
 	m.projectFinderOrigin = ""
-	return m.openProjectCmd(project)
+	return m.openProjectDetail(project)
 }
 
 func (m Model) projectIsExternal(path string) bool {
@@ -468,7 +468,10 @@ func (m Model) projectIsExternal(path string) bool {
 }
 
 func (m Model) projectSplit() bool {
-	return m.contentWidth() >= projectSplitMinWidth
+	// The Projects screen is intentionally a focused picker. Detail content
+	// lives on its own page so wide terminals do not turn the picker into a
+	// crowded split dashboard.
+	return false
 }
 
 func (m *Model) toggleProjectFocus() {
@@ -563,6 +566,26 @@ func (m Model) openProjectCmd(project projects.Project) tea.Cmd {
 			err:     m.backend.RecordProjectOpen(project.Path, workspace),
 		}
 	}
+}
+
+func (m *Model) openProjectDetail(project projects.Project) tea.Cmd {
+	m.projectDetailOpen = true
+	m.projectDetailPath = project.Path
+	m.projectDetailWorkspace = false
+	m.projectDetailScroll = 0
+	m.projectListScroll = 0
+	m.projectFocus = projectFocusDetail
+	return m.openProjectCmd(project)
+}
+
+func (m *Model) openWorkspaceDetail(workspace projects.Workspace) tea.Cmd {
+	m.projectDetailOpen = true
+	m.projectDetailPath = workspace.Path
+	m.projectDetailWorkspace = true
+	m.projectDetailScroll = 0
+	m.projectListScroll = 0
+	m.projectFocus = projectFocusDetail
+	return nil
 }
 
 func (m Model) workspaceFor(projectPath string) string {

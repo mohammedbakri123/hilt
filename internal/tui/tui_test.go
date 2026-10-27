@@ -1416,7 +1416,7 @@ func TestProjectsMouseSelectsRowsAndTabs(t *testing.T) {
 	backend.projectResult = projectFixture()
 	model := openProjects(t, backend, 160, 30)
 
-	updated, command := model.Update(tea.MouseClickMsg{X: 30, Y: 12, Button: tea.MouseLeft})
+	updated, command := model.Update(tea.MouseClickMsg{X: 30, Y: 11, Button: tea.MouseLeft})
 	model = updated.(Model)
 	if command != nil {
 		t.Fatal("selecting a project should not start an operation")
@@ -1426,13 +1426,19 @@ func TestProjectsMouseSelectsRowsAndTabs(t *testing.T) {
 		t.Fatalf("mouse selected = %+v, want Shop.Tests", selected)
 	}
 
-	updated, command = model.Update(tea.MouseClickMsg{X: 108, Y: 8, Button: tea.MouseLeft})
+	updated, command = model.Update(tea.MouseClickMsg{X: 30, Y: 11, Button: tea.MouseLeft})
+	model = updated.(Model)
+	if command == nil || !model.projectDetailOpen {
+		t.Fatal("double-clicking a project should open its detail page")
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	updated, command = model.Update(tea.MouseClickMsg{X: 40, Y: 10, Button: tea.MouseLeft})
 	model = updated.(Model)
 	if command != nil {
-		t.Fatal("switching tabs should not start a command")
+		t.Fatal("switching detail tabs should not start a command")
 	}
-	if model.projectTab != projectTabPackages || model.projectFocus != projectFocusDetail {
-		t.Fatalf("mouse tab = %v focus = %v, want packages/detail", model.projectTab, model.projectFocus)
+	if model.projectTab != projectTabPackages {
+		t.Fatalf("mouse tab = %v, want packages", model.projectTab)
 	}
 }
 
@@ -1440,7 +1446,7 @@ func TestProjectsMouseDoubleClickOpensProject(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
 	model := openProjects(t, backend, 160, 30)
-	click := tea.MouseClickMsg{X: 30, Y: 12, Button: tea.MouseLeft}
+	click := tea.MouseClickMsg{X: 30, Y: 11, Button: tea.MouseLeft}
 
 	updated, command := model.Update(click)
 	model = updated.(Model)
@@ -1455,6 +1461,30 @@ func TestProjectsMouseDoubleClickOpensProject(t *testing.T) {
 	model = applyMessages(t, model, runCmd(t, command))
 	if got := backend.State().ActiveProject; got != "/work/tests/Shop.Tests/Shop.Tests.csproj" {
 		t.Fatalf("active project = %q", got)
+	}
+}
+
+func TestProjectsMouseDoubleClickOpensSolutionDetail(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+	click := tea.MouseClickMsg{X: 30, Y: 9, Button: tea.MouseLeft}
+
+	updated, command := model.Update(click)
+	model = updated.(Model)
+	if command != nil || model.projectDetailOpen {
+		t.Fatal("first solution click should only select")
+	}
+	updated, command = model.Update(click)
+	model = updated.(Model)
+	if command != nil || !model.projectDetailOpen || !model.projectDetailWorkspace {
+		t.Fatal("second solution click should open solution detail")
+	}
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Solution Detail", "Shop.sln", "MEMBER PROJECTS", "Shop.Tests"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("solution detail missing %q:\n%s", want, plain)
+		}
 	}
 }
 
@@ -1523,10 +1553,37 @@ func TestProjectsScreenScansAndShowsMetadata(t *testing.T) {
 		t.Errorf("loaded = %v loading = %v", model.projectsLoaded, model.projectsLoading)
 	}
 	plain := ansi.Strip(model.View().Content)
-	for _, want := range []string{"Projects & Solutions", "WORKSPACES", "Shop.sln", "PROJECTS", "Shop.Tests", "net10.0, net9.0", "[test]", "SELECTED PROJECT", "Microsoft.NET.Sdk", "WARNINGS", "broken.csproj"} {
+	for _, want := range []string{"Projects & Solutions", "WORKSPACES", "Shop.sln", "INDEPENDENT PROJECTS", "Shop.Tests", "net10.0, net9.0", "[test]", "WARNINGS", "broken.csproj"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("projects screen missing %q:\n%s", want, plain)
 		}
+	}
+}
+
+func TestProjectsOpenDedicatedDetailAndReturn(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 100, 30)
+
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if !model.projectDetailOpen || model.projectDetailPath != "/work/src/Shop/Shop.csproj" {
+		t.Fatalf("detail = %v path = %q", model.projectDetailOpen, model.projectDetailPath)
+	}
+	model = applyMessages(t, model, runCmd(t, command))
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Project Detail", "Shop.csproj", "[Overview]", "Packages", "Files", "EF", "Output", "Microsoft.NET.Sdk"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("detail page missing %q:\n%s", want, plain)
+		}
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.projectDetailOpen {
+		t.Fatal("esc should return to the project picker")
+	}
+	if strings.Contains(ansi.Strip(model.View().Content), "Project Detail") {
+		t.Fatal("project detail remained visible after esc")
 	}
 }
 
@@ -1664,6 +1721,9 @@ func TestProjectsTreeTabLoadsSelectedProjectFiles(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
 	model := openProjects(t, backend, 100, 30)
+	updated, openCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, openCommand))
 	updated, command := model.Update(key('t', "t"))
 	model = updated.(Model)
 	if model.projectTab != projectTabTree || command == nil {
@@ -1671,7 +1731,7 @@ func TestProjectsTreeTabLoadsSelectedProjectFiles(t *testing.T) {
 	}
 	model = apply(t, model, command())
 	plain := ansi.Strip(model.View().Content)
-	if !strings.Contains(plain, "[Tree]") || !strings.Contains(plain, "App.csproj") {
+	if !strings.Contains(plain, "[Files]") || !strings.Contains(plain, "App.csproj") {
 		t.Fatalf("tree tab missing loaded file:\n%s", plain)
 	}
 }
@@ -1984,7 +2044,7 @@ func TestFooterMatchesKeymap(t *testing.T) {
 		{name: "diagnostics", model: press(t, loadedModel(t, newFakeBackend(), 160, 40), key('4', "4")), context: ctxDiagnostics},
 		{name: "projects loading", model: projectsLoading, context: ctxProjectsLoading},
 		{name: "projects", model: openProjects(t, backend, 110, 30), context: ctxProjects},
-		{name: "project split", model: projects, context: ctxProjectSplit},
+		{name: "projects wide", model: projects, context: ctxProjects},
 		{name: "project filter", model: projectFiltering, context: ctxProjectFilter},
 		{name: "output", model: drawer, context: ctxOutput},
 		{name: "building", model: building, context: ctxBuild},
@@ -2067,7 +2127,7 @@ func TestTopLevelNavigationHasFiveDestinations(t *testing.T) {
 	}
 }
 
-func TestProjectsSplitFocusAndScrolling(t *testing.T) {
+func TestProjectsPickerScrollsAndOpensDetail(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
 	result := projectFixture()
@@ -2086,43 +2146,17 @@ func TestProjectsSplitFocusAndScrolling(t *testing.T) {
 	}
 	backend.projectResult = result
 	model := openProjects(t, backend, 160, 30)
-	if !model.projectSplit() {
-		t.Fatal("projects should use split panes at 160 columns")
-	}
-	plain := ansi.Strip(model.View().Content)
-	for _, want := range []string{"OVERVIEW", "PROJECTS [focus]", "focus: project list", "Shop.csproj"} {
-		if !strings.Contains(plain, want) {
-			t.Errorf("split projects missing %q:\n%s", want, plain)
-		}
-	}
-
-	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
-	if model.projectFocus != projectFocusDetail {
-		t.Fatalf("tab focus = %v, want detail", model.projectFocus)
-	}
-	plain = ansi.Strip(model.View().Content)
-	if !strings.Contains(plain, "OVERVIEW [focus]") || !strings.Contains(plain, "focus: project detail") {
-		t.Fatalf("detail focus not visible:\n%s", plain)
+	if model.projectSplit() {
+		t.Fatal("project picker should not use split panes")
 	}
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyPgDown})
-	if model.projectDetailScroll <= 0 {
-		t.Fatal("pgdown did not scroll the focused detail pane")
+	if model.projectScroll <= 0 {
+		t.Fatal("pgdown did not scroll the project picker")
 	}
-	if model.projectListScroll != 0 {
-		t.Fatalf("detail scrolling changed the list scroll to %d", model.projectListScroll)
-	}
-
-	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
-	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyPgDown})
-	if model.projectListScroll <= 0 {
-		t.Fatal("pgdown did not scroll the focused list pane")
-	}
-	model = press(t, model, key('j', "j"))
-	if model.projectCursor == 0 {
-		t.Fatal("selection did not move")
-	}
-	if model.projectDetailScroll != 0 {
-		t.Fatalf("list scrolling changed the detail scroll to %d", model.projectDetailScroll)
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyHome})
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !model.projectDetailOpen {
+		t.Fatal("enter should open the dedicated detail page")
 	}
 }
 
@@ -2301,6 +2335,9 @@ func TestProjectsMarksExternalProjects(t *testing.T) {
 	model := openProjects(t, backend, 100, 30)
 	model = press(t, model, key('j', "j"))
 	model = press(t, model, key('j', "j"))
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
 	plain := ansi.Strip(model.View().Content)
 	for _, want := range []string{"[external]", "Location", "external", "/elsewhere/Other/Other.csproj"} {
 		if !strings.Contains(plain, want) {
@@ -2313,6 +2350,9 @@ func TestProjectTabs(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
 	model := openProjects(t, backend, 100, 30)
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
 	plain := ansi.Strip(model.View().Content)
 	if !strings.Contains(plain, "[Overview]") || !strings.Contains(plain, "Microsoft.NET.Sdk") {
 		t.Fatalf("overview tab missing:\n%s", plain)
@@ -2331,7 +2371,7 @@ func TestProjectTabs(t *testing.T) {
 
 	model = press(t, model, key('.', "."))
 	plain = ansi.Strip(model.View().Content)
-	if !strings.Contains(plain, "[Data]") || !strings.Contains(plain, "No migrations loaded") {
+	if !strings.Contains(plain, "[EF]") || !strings.Contains(plain, "No migrations loaded") {
 		t.Errorf("data tab missing:\n%s", plain)
 	}
 
@@ -2359,6 +2399,7 @@ func TestProjectTabsResetDetailScroll(t *testing.T) {
 	}
 	backend.projectResult = result
 	model := openProjects(t, backend, 160, 30)
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
 	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if model.projectDetailScroll == 0 {

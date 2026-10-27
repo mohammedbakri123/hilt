@@ -14,7 +14,7 @@ Built in pure Go with [Charm](https://charm.sh) (Bubble Tea, Lip Gloss, Bubbles)
 - **Zero-.NET Dependency:** Inspects system installations, diagnoses missing dependencies, and bootstraps .NET SDKs and runtimes from scratch without needing .NET pre-installed.
 - **Side-by-Side Managed Toolchains:** Download and install official Microsoft .NET SDKs and runtimes into an isolated, user-owned directory (`~/.hilt/data/dotnet`) without administrative privileges or modifying system files.
 - **Non-Destructive & Safe by Default:** System packages and external installations are discovered with read-wide access, but Hilt never touches `sudo`, package managers, or `PATH` automatically.
-- **Project Explorer & Cockpit:** Background scanning for solutions (`.sln`, `.slnx`, `.slnf`) and C# projects (`.csproj`), showing target frameworks, project references, and package dependencies.
+- **Project Explorer & Details:** A focused solution/project picker opens a dedicated detail page for target frameworks, references, packages, files, EF Core, and build output.
 - **Interactive Streaming Build:** Build projects directly inside the TUI (`b`) with streamed stdout/stderr output into an expandable, scrollable output drawer (`o`).
 - **Comprehensive CLI & Automation:** Every management action is available through consistent CLI commands with `--json` support for seamless shell scripting and CI/CD.
 
@@ -28,22 +28,16 @@ Built in pure Go with [Charm](https://charm.sh) (Bubble Tea, Lip Gloss, Bubbles)
  WORKSPACE            WORKSPACES
    1 Home               Shop                                  [sln] /home/user/src/Shop.sln
  ▌ 2 Projects
-   3 SDKs             PROJECTS                                              [2/2 projects]
-   4 Diagnostics        NAME                  FRAMEWORKS      PATH
-   5 Settings         > Shop                  net10.0, net8.0 src/Shop/Shop.csproj
-                        Shop.Tests    [test]  net10.0         tests/Shop.Tests/Shop.Tests.csproj
+   3 SDKs             PROJECTS & SOLUTIONS                         [2 projects]
+   4 Diagnostics        Shop.sln [sln] /home/user/src/Shop.sln
+   5 Settings             > Shop       net10.0, net8.0  src/Shop/Shop.csproj
+                          Shop.Tests   net10.0          tests/Shop.Tests/Shop.Tests.csproj
 
-                      SELECTED PROJECT
-                      [Overview]  Packages  Data  Output
-                      Path          src/Shop/Shop.csproj
-                      Frameworks    net10.0, net8.0
-                      SDK           Microsoft.NET.Sdk
-                      Output        Exe
-                      References    1
-                        ..\Library\Library.csproj
+                      Press enter or double-click to open the detail page.
+                      Detail page: Overview · Packages · Files · EF · Output
 ─────────────────────────────────────────────────────────────────────────────────────────────
  [ok] Active project: Shop.
- b build  p change root  / filter  tab focus  o drawer  r refresh  ? help  q quit
+ enter open  / find  p root  a add  e fold  n new  x delete  ? help  q quit
 ```
 
 ---

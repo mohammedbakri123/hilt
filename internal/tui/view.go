@@ -225,6 +225,9 @@ func (m Model) footerContext() keyContext {
 	case m.screen == ScreenDiagnostics:
 		return ctxDiagnostics
 	case m.screen == ScreenProjects:
+		if m.projectDetailOpen {
+			return ctxProjectDetail
+		}
 		if m.projectFiltering {
 			return ctxProjectFilter
 		}
