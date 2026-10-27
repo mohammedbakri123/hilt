@@ -35,7 +35,9 @@ type csprojItemGroup struct {
 }
 
 type csprojReference struct {
-	Include string `xml:"Include,attr"`
+	Include        string `xml:"Include,attr"`
+	Version        string `xml:"Version,attr"`
+	VersionElement string `xml:"Version"`
 }
 
 var testPackages = map[string]bool{
@@ -89,6 +91,7 @@ func ParseProject(path string) (Project, error) {
 	}
 
 	var references []string
+	var packages []PackageReference
 	for _, group := range document.ItemGroups {
 		for _, reference := range group.ProjectReferences {
 			if resolved := resolvePath(directory, reference.Include); resolved != "" {
@@ -96,6 +99,14 @@ func ParseProject(path string) (Project, error) {
 			}
 		}
 		for _, reference := range group.PackageReferences {
+			name := strings.TrimSpace(reference.Include)
+			version := strings.TrimSpace(reference.Version)
+			if version == "" {
+				version = strings.TrimSpace(reference.VersionElement)
+			}
+			if name != "" {
+				packages = append(packages, PackageReference{Name: name, Version: version})
+			}
 			if testPackages[strings.ToLower(strings.TrimSpace(reference.Include))] {
 				testProject = true
 			}
@@ -122,7 +133,22 @@ func ParseProject(path string) (Project, error) {
 		OutputType:        outputType,
 		TestProject:       testProject,
 		ProjectReferences: uniqueStrings(references),
+		PackageReferences: uniquePackageReferences(packages),
 	}, nil
+}
+
+func uniquePackageReferences(packages []PackageReference) []PackageReference {
+	seen := make(map[string]bool, len(packages))
+	result := make([]PackageReference, 0, len(packages))
+	for _, packageReference := range packages {
+		key := strings.ToLower(packageReference.Name)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, packageReference)
+	}
+	return result
 }
 
 func splitFrameworks(value string) []string {

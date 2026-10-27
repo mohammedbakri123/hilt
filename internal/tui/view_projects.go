@@ -373,17 +373,61 @@ func (m Model) projectTabContent(project projects.Project, width int) []string {
 		}
 		return lines
 	case projectTabPackages:
-		return []string{
-			styleMuted.Render("No package actions yet."),
-			"",
-			styleMuted.Render("Package listing and management arrive after the build and run foundation."),
+		if len(project.PackageReferences) == 0 {
+			return []string{styleMuted.Render("No declared package references."), "", styleFaint.Render("Package references are read from the project file.")}
 		}
+		lines := []string{styleMuted.Render(fmt.Sprintf("Declared NuGet packages · %d", len(project.PackageReferences)))}
+		for _, packageReference := range project.PackageReferences {
+			version := "version managed centrally"
+			if packageReference.Version != "" {
+				version = packageReference.Version
+			}
+			lines = append(lines, "  "+styleValue.Render(packageReference.Name)+"  "+styleFaint.Render(version))
+		}
+		return lines
 	case projectTabData:
-		return []string{
-			styleMuted.Render("No migrations loaded."),
-			"",
-			styleMuted.Render("EF Design support and dotnet-ef are not wired yet. Hilt never installs dotnet-ef automatically."),
+		lines := []string{styleMuted.Render("Entity Framework Core")}
+		efPackages := make([]projects.PackageReference, 0)
+		for _, packageReference := range project.PackageReferences {
+			if projects.IsEntityFrameworkCorePackage(packageReference.Name) {
+				efPackages = append(efPackages, packageReference)
+			}
 		}
+		if len(efPackages) == 0 {
+			return append(lines, "", styleMuted.Render("No EF Core package references detected."), styleFaint.Render("Hilt will not install dotnet-ef automatically."))
+		}
+		packageWord := "packages"
+		if len(efPackages) == 1 {
+			packageWord = "package"
+		}
+		lines = append(lines, styleOK.Render(fmt.Sprintf("EF Core detected · %d %s", len(efPackages), packageWord)), "")
+		for _, packageReference := range efPackages {
+			version := "version managed centrally"
+			if packageReference.Version != "" {
+				version = packageReference.Version
+			}
+			lines = append(lines, "  "+styleValue.Render(packageReference.Name)+"  "+styleFaint.Render(version))
+		}
+		if m.projectTreeLoading {
+			return append(lines, "", m.spinner.View()+" checking migration files...")
+		}
+		if m.projectTreeErr != nil {
+			return append(lines, "", styleError.Render("Migration inspection failed: "+m.projectTreeErr.Error()))
+		}
+		migrations := make([]string, 0)
+		for _, entry := range m.projectTree {
+			if !entry.Directory && isMigrationPath(entry.RelativePath) {
+				migrations = append(migrations, entry.RelativePath)
+			}
+		}
+		if len(migrations) == 0 {
+			return append(lines, "", styleMuted.Render("No migration files detected."), styleFaint.Render("Use the action menu for EF commands when dotnet-ef is available."))
+		}
+		lines = append(lines, "", styleLabel.Render(fmt.Sprintf("MIGRATIONS · %d", len(migrations))))
+		for _, migration := range migrations {
+			lines = append(lines, "  "+styleValue.Render(migration))
+		}
+		return lines
 	case projectTabOutput:
 		if m.hasBuildTarget && m.buildTarget.Path == project.Path {
 			lines := []string{styleMuted.Render("Build output streams in the bottom drawer.")}
@@ -400,6 +444,18 @@ func (m Model) projectTabContent(project projects.Project, width int) []string {
 		}
 	}
 	return m.projectDetailContent(project, width)
+}
+
+func isMigrationPath(path string) bool {
+	path = strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
+	parts := strings.Split(path, "/")
+	for _, part := range parts[:len(parts)-1] {
+		if part == "migrations" {
+			return true
+		}
+	}
+	base := parts[len(parts)-1]
+	return strings.HasSuffix(base, "modelsnapshot.cs")
 }
 
 func projectWarningContent(lines []string, warnings []string, width int) []string {

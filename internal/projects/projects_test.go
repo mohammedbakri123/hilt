@@ -100,6 +100,9 @@ func TestParseProjectDetectsTestProjects(t *testing.T) {
 	if len(project.ProjectReferences) != 1 {
 		t.Errorf("ProjectReferences = %v", project.ProjectReferences)
 	}
+	if len(project.PackageReferences) != 2 || project.PackageReferences[0].Name != "Microsoft.NET.Test.Sdk" || project.PackageReferences[0].Version != "17.0.0" {
+		t.Errorf("PackageReferences = %v", project.PackageReferences)
+	}
 }
 
 func TestParseProjectErrors(t *testing.T) {

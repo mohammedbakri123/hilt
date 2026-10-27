@@ -75,7 +75,7 @@ func (m *Model) moveProjectTab(delta int) {
 }
 
 func (m *Model) startProjectTreeScan() tea.Cmd {
-	if m.projectTab != projectTabTree {
+	if m.projectTab != projectTabTree && m.projectTab != projectTabData {
 		return nil
 	}
 	project, ok := m.selectedProject()

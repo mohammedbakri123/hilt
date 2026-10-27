@@ -21,17 +21,24 @@ const (
 	KindProject Kind = "csproj"
 )
 
+// PackageReference is a declared NuGet package dependency.
+type PackageReference struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
 // Project is a .csproj file and its declared metadata.
 type Project struct {
-	Path              string   `json:"path"`
-	Name              string   `json:"name"`
-	Directory         string   `json:"directory"`
-	Kind              Kind     `json:"kind"`
-	TargetFrameworks  []string `json:"targetFrameworks"`
-	SDK               string   `json:"sdk,omitempty"`
-	OutputType        string   `json:"outputType,omitempty"`
-	TestProject       bool     `json:"testProject"`
-	ProjectReferences []string `json:"projectReferences"`
+	Path              string             `json:"path"`
+	Name              string             `json:"name"`
+	Directory         string             `json:"directory"`
+	Kind              Kind               `json:"kind"`
+	TargetFrameworks  []string           `json:"targetFrameworks"`
+	SDK               string             `json:"sdk,omitempty"`
+	OutputType        string             `json:"outputType,omitempty"`
+	TestProject       bool               `json:"testProject"`
+	ProjectReferences []string           `json:"projectReferences"`
+	PackageReferences []PackageReference `json:"packageReferences"`
 }
 
 // Workspace is a solution, solution filter, or standalone project. ProjectPaths
@@ -80,4 +87,11 @@ func KindForPath(path string) (Kind, bool) {
 	default:
 		return "", false
 	}
+}
+
+// IsEntityFrameworkCorePackage reports whether a package belongs to the
+// Microsoft.EntityFrameworkCore family.
+func IsEntityFrameworkCorePackage(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return name == "microsoft.entityframeworkcore" || strings.HasPrefix(name, "microsoft.entityframeworkcore.")
 }

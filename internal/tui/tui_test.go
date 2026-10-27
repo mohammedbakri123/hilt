@@ -1372,6 +1372,7 @@ func projectFixture() projects.Result {
 				SDK:               "Microsoft.NET.Sdk",
 				OutputType:        "Exe",
 				ProjectReferences: []string{"/work/src/Library/Library.csproj"},
+				PackageReferences: []projects.PackageReference{{Name: "Microsoft.EntityFrameworkCore.SqlServer", Version: "10.0.0"}},
 			},
 			{
 				Path:             "/work/tests/Shop.Tests/Shop.Tests.csproj",
@@ -2380,7 +2381,7 @@ func TestProjectTabs(t *testing.T) {
 		t.Fatalf("tab = %v, want packages", model.projectTab)
 	}
 	plain = ansi.Strip(model.View().Content)
-	for _, want := range []string{"[Packages]", "No package actions yet"} {
+	for _, want := range []string{"[Packages]", "Microsoft.EntityFrameworkCore.SqlServer", "10.0.0"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("packages tab missing %q:\n%s", want, plain)
 		}
@@ -2388,7 +2389,7 @@ func TestProjectTabs(t *testing.T) {
 
 	model = press(t, model, key('.', "."))
 	plain = ansi.Strip(model.View().Content)
-	if !strings.Contains(plain, "[EF]") || !strings.Contains(plain, "No migrations loaded") {
+	if !strings.Contains(plain, "[EF]") || !strings.Contains(plain, "EF Core detected") {
 		t.Errorf("data tab missing:\n%s", plain)
 	}
 
