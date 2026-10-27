@@ -269,7 +269,8 @@ func (m Model) projectFinderCmd() tea.Cmd {
 		if err != nil {
 			return projectFinderMsg{request: request, path: path, err: err}
 		}
-		return projectFinderMsg{request: request, path: path, directories: directories}
+		result, err := backend.ScanProjectsShallow(ctx, path, false)
+		return projectFinderMsg{request: request, path: path, directories: directories, result: result, err: err}
 	}
 }
 
@@ -283,7 +284,7 @@ func (m Model) handleProjectFinderMsg(message projectFinderMsg) Model {
 		return m
 	}
 	m.projectFinderError = nil
-	entries := m.projectFinderEntriesForPath(m.projectFinderPath)
+	entries := projectFinderEntriesForResult(m.projectFinderPath, message.result)
 	for _, directory := range message.directories {
 		path := filepath.Clean(directory)
 		found := false

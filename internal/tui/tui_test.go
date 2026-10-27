@@ -446,6 +446,10 @@ func (f fakeBackend) ScanProjects(context.Context, string, bool) (projects.Resul
 	}
 	return f.projectResult, f.projectErr
 }
+func (f fakeBackend) ScanProjectsShallow(context.Context, string, bool) (projects.Result, error) {
+	f.record("scan-projects-shallow")
+	return f.projectResult, f.projectErr
+}
 func (f fakeBackend) ListDirectories(_ context.Context, path string, includeHidden bool) ([]string, error) {
 	if f.directoryCalls != nil {
 		*f.directoryCalls = append(*f.directoryCalls, pickerDirectoryCall{path: path, hidden: includeHidden})

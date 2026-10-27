@@ -149,6 +149,9 @@ func (f fakeBackend) ScanProjects(_ context.Context, root string, includeHidden 
 	}
 	return f.projectResult, f.projectErr
 }
+func (f fakeBackend) ScanProjectsShallow(context.Context, string, bool) (projects.Result, error) {
+	return f.projectResult, f.projectErr
+}
 func (f fakeBackend) InspectProject(context.Context, string) (projects.Inspection, error) {
 	return f.inspection, f.inspectErr
 }

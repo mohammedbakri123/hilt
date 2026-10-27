@@ -412,6 +412,23 @@ func (a *App) ScanProjects(ctx context.Context, root string, includeHidden bool)
 	})
 }
 
+// ScanProjectsShallow discovers supported project and solution files directly
+// inside root without walking into child directories. It is intended for
+// interactive folder pickers where recursive discovery would make navigation
+// feel slow.
+func (a *App) ScanProjectsShallow(ctx context.Context, root string, includeHidden bool) (projects.Result, error) {
+	current := a.Config()
+	if root == "" {
+		root = a.paths.ProjectsRoot
+	}
+	return projects.Scan(ctx, projects.Options{
+		Root:          root,
+		Exclusions:    current.ScanExclusions,
+		IncludeHidden: includeHidden,
+		MaxDepth:      1,
+	})
+}
+
 // ListDirectories returns the absolute paths of directories directly under
 // path. Symlinked directories are omitted so callers cannot walk outside the
 // selected tree accidentally.

@@ -326,6 +326,21 @@ func TestScanProjectsUsesRootAndConfiguration(t *testing.T) {
 	if len(result.Projects) != 1 || result.Projects[0].Path != externalPath {
 		t.Fatalf("external projects = %+v", result.Projects)
 	}
+	nestedDir := filepath.Join(externalDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nestedPath := filepath.Join(nestedDir, "Nested.csproj")
+	if err := os.WriteFile(nestedPath, []byte(`<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shallow, err := application.ScanProjectsShallow(context.Background(), externalDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shallow.Projects) != 1 || shallow.Projects[0].Path != externalPath {
+		t.Fatalf("shallow projects = %+v", shallow.Projects)
+	}
 
 	inspection, err := application.InspectProject(context.Background(), projectPath)
 	if err != nil {
