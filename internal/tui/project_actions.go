@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -90,7 +91,36 @@ func (m *Model) startProjectAction() tea.Cmd {
 	}
 	args := projectActionArguments(action, targetPath)
 	refreshProjects := action.kind == projectActionPackageAdd || action.kind == projectActionPackageRemove || action.kind == projectActionPackageUpdate
+	if projectActionNeedsConfirmation(action.kind) {
+		m.queueProjectActionConfirmation(action.label, name, targetPath, args, refreshProjects)
+		return nil
+	}
 	return m.startProjectCommand(action.label, name, targetPath, args, refreshProjects)
+}
+
+func (m *Model) queueProjectActionConfirmation(label, name, targetPath string, args []string, refreshProjects bool) {
+	m.pendingProjectAction = &pendingProjectAction{
+		label:           label,
+		name:            name,
+		targetPath:      targetPath,
+		args:            append([]string(nil), args...),
+		refreshProjects: refreshProjects,
+	}
+	m.confirm = confirmProjectAction
+	m.confirmSummary = []string{
+		fmt.Sprintf("%s for %s", label, name),
+		"This changes project state and may update files or the database.",
+		"dotnet " + strings.Join(args, " "),
+	}
+}
+
+func projectActionNeedsConfirmation(kind projectActionKind) bool {
+	switch kind {
+	case projectActionPackageRemove, projectActionPackageUpdate, projectActionEFUpdate, projectActionEFRemove:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Model) startProjectCommand(label, name, targetPath string, args []string, refreshProjects bool) tea.Cmd {
@@ -178,7 +208,7 @@ func projectHasEFCore(project projects.Project) bool {
 }
 
 func (m Model) renderProjectActionMenu(width int) string {
-	boxWidth := 42
+	boxWidth := 68
 	if boxWidth > width-4 {
 		boxWidth = width - 4
 	}
@@ -186,16 +216,71 @@ func (m Model) renderProjectActionMenu(width int) string {
 	if m.projectDetailWorkspace {
 		target = "solution"
 	}
-	content := []string{styleMuted.Render("Actions for the selected " + target), ""}
+	content := []string{styleMuted.Render("Actions for the selected " + target), styleFaint.Render("Choose an action; destructive changes ask for confirmation."), ""}
+	group := ""
 	for index, action := range m.projectActionsForCurrent() {
+		currentGroup := projectActionGroup(action)
+		if currentGroup != group {
+			if group != "" {
+				content = append(content, "")
+			}
+			content = append(content, styleLabel.Render(currentGroup))
+			group = currentGroup
+		}
 		marker := "  "
 		if index == m.projectActionCursor {
 			marker = styleAccent.Render("> ")
 		}
-		content = append(content, marker+styleValue.Render(action.label))
+		line := marker + styleValue.Render(action.label)
+		if description := projectActionDescription(action); description != "" {
+			line += "  " + styleMuted.Render(description)
+		}
+		content = append(content, line)
+	}
+	selected := m.projectActionsForCurrent()
+	if len(selected) > 0 {
+		action := selected[clampIndex(m.projectActionCursor, len(selected))]
+		content = append(content, "", styleFaint.Render("Selected: "+projectActionDescription(action)))
 	}
 	content = append(content, "", styleFaint.Render("↑/↓ select · enter run · esc close"))
 	return styleCallout.Width(boxWidth).Render(joinLines(content))
+}
+
+func projectActionGroup(action projectAction) string {
+	if action.kind >= projectActionEFList {
+		return "EF CORE"
+	}
+	if action.kind >= projectActionPackageList {
+		return "PACKAGES"
+	}
+	return "BUILD & RUN"
+}
+
+func projectActionDescription(action projectAction) string {
+	switch action.kind {
+	case projectActionPackageList:
+		return "inspect references"
+	case projectActionPackageAdd:
+		return "add NuGet reference"
+	case projectActionPackageRemove:
+		return "remove NuGet reference"
+	case projectActionPackageUpdate:
+		return "change NuGet version"
+	case projectActionPackageRestore:
+		return "restore dependencies"
+	case projectActionEFList:
+		return "show migrations"
+	case projectActionEFAdd:
+		return "create migration"
+	case projectActionEFUpdate:
+		return "apply database changes"
+	case projectActionEFRemove:
+		return "remove last migration"
+	}
+	if action.workspace {
+		return "whole solution"
+	}
+	return "dotnet " + strings.Join(action.args, " ")
 }
 
 func joinLines(lines []string) string {

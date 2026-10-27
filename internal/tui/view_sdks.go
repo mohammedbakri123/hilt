@@ -432,6 +432,8 @@ func confirmTitle(kind confirmKind) string {
 		return "CREATE PROJECT"
 	case confirmDeleteProject:
 		return "DELETE PROJECT FILE"
+	case confirmProjectAction:
+		return "PROJECT ACTION"
 	default:
 		return "ACTION"
 	}

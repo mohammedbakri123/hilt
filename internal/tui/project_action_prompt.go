@@ -122,7 +122,22 @@ func (m *Model) submitProjectActionPrompt() tea.Cmd {
 		args = []string{"ef", "migrations", "add", name, "--project", project.Path}
 	}
 	m.projectActionPrompt.open = false
+	if projectActionNeedsConfirmation(promptKindToActionKind(m.projectActionPrompt.kind)) {
+		m.queueProjectActionConfirmation(label, project.Name, project.Path, args, refresh)
+		return nil
+	}
 	return m.startProjectCommand(label, project.Name, project.Path, args, refresh)
+}
+
+func promptKindToActionKind(kind projectActionPromptKind) projectActionKind {
+	switch kind {
+	case projectActionPromptPackageRemove:
+		return projectActionPackageRemove
+	case projectActionPromptPackageUpdate:
+		return projectActionPackageUpdate
+	default:
+		return projectActionCommand
+	}
 }
 
 func (m Model) renderProjectActionPrompt(width int) string {

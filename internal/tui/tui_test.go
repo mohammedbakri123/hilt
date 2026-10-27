@@ -1706,6 +1706,39 @@ func TestProjectsOpenDedicatedDetailAndReturn(t *testing.T) {
 	}
 }
 
+func TestProjectDetailShowsExecutionStateAndLogs(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 120, 36)
+	updated, openCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, openCommand))
+
+	plain := ansi.Strip(model.View().Content)
+	for _, want := range []string{"EXECUTION", "IDLE", "Press B to choose a build or run configuration"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("idle detail missing %q:\n%s", want, plain)
+		}
+	}
+
+	updated, command := model.Update(key('b', "b"))
+	model = updated.(Model)
+	if command == nil || !model.buildRunning {
+		t.Fatalf("build state: command=%v running=%v", command != nil, model.buildRunning)
+	}
+	plain = ansi.Strip(model.View().Content)
+	for _, want := range []string{"BUILDING", "BUILD LOGS", "open live logs"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("running detail missing %q:\n%s", want, plain)
+		}
+	}
+
+	model = press(t, model, key('s', "s"))
+	if !model.buildCancelling {
+		t.Fatal("s should request cancellation of the active build")
+	}
+}
+
 func TestProjectsCanImportAndPinExternalSource(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
@@ -1864,7 +1897,7 @@ func TestProjectActionMenuRunsSelectedCommand(t *testing.T) {
 		t.Fatal("project action menu did not open")
 	}
 	plain := ansi.Strip(model.View().Content)
-	for _, want := range []string{"Build", "Clean", "Restore", "Test", "Run"} {
+	for _, want := range []string{"BUILD & RUN", "PACKAGES", "EF CORE", "Build", "Clean", "Restore", "Test", "Run", "Selected:"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("action menu missing %q", want)
 		}
@@ -1980,6 +2013,10 @@ func TestPackageUpdateRemoveRestoreActions(t *testing.T) {
 			updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			model = updated.(Model)
 		}
+		if model.confirm != confirmNone {
+			updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			model = updated.(Model)
+		}
 		model = applyMessages(t, model, runCmd(t, command))
 		if len(requests) == 0 {
 			t.Fatal("action did not execute")
@@ -2051,6 +2088,10 @@ func TestEFActionsRunDotnetCommands(t *testing.T) {
 				t.Fatalf("action %q did not open prompt", item.label)
 			}
 			model = typeText(t, model, item.prompt)
+			updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			model = updated.(Model)
+		}
+		if model.confirm != confirmNone {
 			updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			model = updated.(Model)
 		}

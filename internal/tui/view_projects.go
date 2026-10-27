@@ -430,17 +430,23 @@ func (m Model) projectTabContent(project projects.Project, width int) []string {
 		return lines
 	case projectTabOutput:
 		if m.hasBuildTarget && m.buildTarget.Path == project.Path {
-			lines := []string{styleMuted.Render("Build output streams in the bottom drawer.")}
-			if m.buildResult != nil {
-				lines = append(lines, "", kvSized("Last build", buildDrawerStatus(*m.buildResult, m.buildErr), 14))
+			verb := m.buildMode.label()
+			if m.buildRunning {
+				lines := []string{styleWarning.Render("LIVE · " + strings.ToUpper(verb) + " logs are streaming in the bottom drawer.")}
+				lines = append(lines, "", styleKey.Render("s")+" stop   "+styleKey.Render("l")+" open live logs")
+				return lines
 			}
-			lines = append(lines, "", styleMuted.Render("Press o to open or close the output drawer."))
+			lines := []string{styleMuted.Render(verb + " logs are available in the bottom drawer.")}
+			if m.buildResult != nil {
+				lines = append(lines, "", kvSized("Last "+verb, buildDrawerStatus(*m.buildResult, m.buildErr), 14))
+			}
+			lines = append(lines, "", styleMuted.Render("Press l to open logs or o to toggle the drawer."))
 			return lines
 		}
 		return []string{
-			styleMuted.Render("No build or run output yet."),
+			styleMuted.Render("No build or run output yet; no logs captured."),
 			"",
-			styleMuted.Render("Press o to open the output drawer."),
+			styleMuted.Render("Start a build or run, then press l to open its logs."),
 		}
 	}
 	return m.projectDetailContent(project, width)

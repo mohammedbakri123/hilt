@@ -57,6 +57,7 @@ const (
 	confirmUpdateRuntime
 	confirmCreateProjects
 	confirmDeleteProject
+	confirmProjectAction
 )
 
 type operationKind string
@@ -287,6 +288,7 @@ func (m *Model) clearConfirm() {
 	m.pendingFramework = install.FrameworkAll
 	m.pendingCreatePlan = nil
 	m.pendingDeleteProject = nil
+	m.pendingProjectAction = nil
 }
 
 func (m *Model) setStatus(message string, isError bool) {
@@ -623,6 +625,12 @@ func (m *Model) confirmAction() tea.Cmd {
 			}
 			return projectDeleteMsg{project: project, err: backend.DeleteProject(project.Path)}
 		}
+	case confirmProjectAction:
+		if m.pendingProjectAction == nil {
+			return nil
+		}
+		action := *m.pendingProjectAction
+		return m.startProjectCommand(action.label, action.name, action.targetPath, action.args, action.refreshProjects)
 	}
 	return nil
 }
