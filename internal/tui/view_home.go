@@ -107,6 +107,15 @@ func (m Model) homeLines(width int) []string {
 	lines = append(lines, "")
 	lines = append(lines, panelBox("PROJECTS", projectContent, width)...)
 
+	actions := []string{
+		styleAccent.Render("2") + "  " + styleValue.Render("Projects") + "  " + styleMuted.Render("scan, inspect, build, or run"),
+		styleAccent.Render("3") + "  " + styleValue.Render("SDKs") + "  " + styleMuted.Render("install and manage toolchains"),
+		styleAccent.Render("4") + "  " + styleValue.Render("Diagnostics") + "  " + styleMuted.Render("check the local environment"),
+		styleFaint.Render("click a sidebar item or press its number"),
+	}
+	lines = append(lines, "")
+	lines = append(lines, panelBox("QUICK ACTIONS", actions, width)...)
+
 	if m.inventory != nil && !m.inventory.HasUsableHost() && len(m.inventory.SDKs) == 0 {
 		lines = append(lines, "")
 		lines = append(lines, styledWrapped("No .NET SDK detected. Hilt remains fully usable; press i or run hilt sdk install.", width, styleWarning)...)
