@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -162,6 +163,40 @@ func (m *Model) moveProject(delta int) {
 	m.projectCursor = clampIndex(m.projectCursor+delta, len(projectsList))
 	m.projectDetailScroll = 0
 	m.ensureProjectSelectionVisible()
+}
+
+func (m *Model) toggleSelectedProjectWorkspace() {
+	project, ok := m.selectedProject()
+	if !ok || m.projectResult == nil {
+		m.setStatus("Select a project before changing the tree.", false)
+		return
+	}
+	workspacePath := m.workspaceFor(project.Path)
+	if workspacePath == "" {
+		m.setStatus("The selected project is independent.", false)
+		return
+	}
+	if m.projectExpanded == nil {
+		m.projectExpanded = make(map[string]bool)
+	}
+	expanded := m.workspaceExpanded(workspacePath)
+	m.projectExpanded[workspacePath] = !expanded
+	state := "collapsed"
+	if !expanded {
+		state = "expanded"
+	}
+	m.setStatus(fmt.Sprintf("Workspace %s %s.", filepath.Base(workspacePath), state), false)
+}
+
+func (m Model) workspaceExpanded(path string) bool {
+	if m.projectExpanded == nil {
+		return true
+	}
+	expanded, exists := m.projectExpanded[path]
+	if !exists {
+		return true
+	}
+	return expanded
 }
 
 func (m Model) filteredProjects() []projects.Project {

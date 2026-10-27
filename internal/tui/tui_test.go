@@ -1424,6 +1424,27 @@ func TestProjectsCanImportAndPinExternalSource(t *testing.T) {
 	}
 }
 
+func TestProjectsTreeCanCollapseAndExpandWorkspace(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 160, 30)
+
+	model = press(t, model, key('e', "e"))
+	collapsed := ansi.Strip(model.View().Content)
+	if strings.Contains(collapsed, "Shop.Tests") {
+		t.Fatalf("collapsed workspace still shows child project:\n%s", collapsed)
+	}
+	if !strings.Contains(model.statusMessage, "collapsed") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+
+	model = press(t, model, key('e', "e"))
+	expanded := ansi.Strip(model.View().Content)
+	if !strings.Contains(expanded, "Shop.Tests") {
+		t.Fatalf("expanded workspace is missing child project:\n%s", expanded)
+	}
+}
+
 func TestProjectsSelectionSurvivesRefresh(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()

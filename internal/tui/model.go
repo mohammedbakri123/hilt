@@ -184,6 +184,7 @@ type Model struct {
 	projectDetailScroll int
 	projectFocus        projectFocus
 	projectTab          projectTab
+	projectExpanded     map[string]bool
 	projectFilter       string
 	projectFiltering    bool
 	projectCancel       context.CancelFunc
@@ -678,6 +679,9 @@ func (m Model) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.promptInput = ""
 			m.promptFocusInput = true
 			m.setStatus("", false)
+			return m, nil
+		case "e":
+			m.toggleSelectedProjectWorkspace()
 			return m, nil
 		case "b":
 			return m, m.startBuild()

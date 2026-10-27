@@ -176,3 +176,17 @@ func TestSaveRejectsEmptyPath(t *testing.T) {
 		t.Fatal("expected an empty-path error")
 	}
 }
+
+func TestPinnedExternalProjectsAreUniqueAndRemovable(t *testing.T) {
+	current := Defaults()
+	current.PinExternalProject("/work/one.sln")
+	current.PinExternalProject("/work/one.sln")
+	current.PinExternalProject("/work/two")
+	if len(current.PinnedExternalProjects) != 2 {
+		t.Fatalf("pinned projects = %v", current.PinnedExternalProjects)
+	}
+	current.UnpinExternalProject("/work/one.sln")
+	if len(current.PinnedExternalProjects) != 1 || current.PinnedExternalProjects[0] != "/work/two" {
+		t.Fatalf("after unpin = %v", current.PinnedExternalProjects)
+	}
+}

@@ -128,19 +128,38 @@ func (m Model) projectListContent() ([]string, int) {
 	if result == nil {
 		return []string{"Projects not loaded."}, 0
 	}
-	lines := []string{styleLabel.Render("WORKSPACES")}
+	lines := []string{styleLabel.Render("WORKSPACES  ·  press e to fold")}
 	if len(result.Workspaces) == 0 {
 		lines = append(lines, "  "+styleMuted.Render("none found"))
 	}
+	projectList := m.filteredProjects()
+	listed := make(map[string]bool)
 	for _, workspace := range result.Workspaces {
-		line := "  " + styleValue.Render(workspace.Name) + "  " +
+		marker := "▾"
+		if !m.workspaceExpanded(workspace.Path) {
+			marker = "▸"
+		}
+		line := "  " + styleAccent.Render(marker) + " " + styleValue.Render(workspace.Name) + "  " +
 			styleMuted.Render("["+string(workspace.Kind)+"]")
 		line += styleFaint.Render(fmt.Sprintf("  (%d projects)", len(workspace.ProjectPaths)))
 		lines = append(lines, line)
+		for _, project := range projectList {
+			if containsPath(workspace.ProjectPaths, project.Path) {
+				listed[project.Path] = true
+			}
+		}
+		if !m.workspaceExpanded(workspace.Path) {
+			continue
+		}
+		for index, project := range projectList {
+			if !containsPath(workspace.ProjectPaths, project.Path) {
+				continue
+			}
+			lines = append(lines, "    "+m.projectRow(project, index, true))
+		}
 	}
-	lines = append(lines, "", styleLabel.Render("PROJECTS"))
+	lines = append(lines, "", styleLabel.Render("INDEPENDENT PROJECTS"))
 	selectedLine := len(lines)
-	projectList := m.filteredProjects()
 	if len(projectList) == 0 {
 		if m.projectFilter != "" {
 			lines = append(lines,
@@ -152,14 +171,36 @@ func (m Model) projectListContent() ([]string, int) {
 		}
 		return lines, selectedLine
 	}
+	independent := 0
+	for _, project := range projectList {
+		if !listed[project.Path] {
+			independent++
+		}
+	}
+	if independent == 0 {
+		lines = append(lines, "  "+styleMuted.Render("none"))
+		return lines, selectedLine
+	}
 	lines = append(lines, styleFaint.Render("  NAME                  FRAMEWORKS"))
 	for index, project := range projectList {
+		if listed[project.Path] {
+			continue
+		}
 		if index == m.projectCursor {
 			selectedLine = len(lines)
 		}
-		lines = append(lines, m.projectRow(project, index, true))
+		lines = append(lines, "  "+m.projectRow(project, index, true))
 	}
 	return lines, selectedLine
+}
+
+func containsPath(paths []string, target string) bool {
+	for _, path := range paths {
+		if path == target {
+			return true
+		}
+	}
+	return false
 }
 
 func projectPaneWidths(width int) (int, int) {

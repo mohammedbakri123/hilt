@@ -38,6 +38,7 @@ const (
 	actionOpenDirectory   keyAction = "open-directory"
 	actionChooseRoot      keyAction = "choose-root"
 	actionToggleHidden    keyAction = "toggle-hidden"
+	actionToggleTree      keyAction = "toggle-tree"
 )
 
 type keyContext string
@@ -142,7 +143,7 @@ var keymap = map[keyContext]keyContextSpec{
 	}},
 	ctxDiagnostics: {CompactWidth: 100, Bindings: []keyBinding{
 		{Key: "[/]", Action: actionNavigate, Label: "section", Compact: true},
-		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
+		{Key: "pgup/dn", Action: actionScroll, Label: "scroll"},
 		{Key: "r", Action: actionRefresh, Label: "re-run", Compact: true},
 		{Key: "d", Action: actionDoctor, Label: "doctor"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
@@ -159,11 +160,12 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "enter", Action: actionConfirm, Label: "open", Compact: true},
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
-		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
+		{Key: "/", Action: actionFilter, Label: "find", Compact: true},
 		{Key: "p", Action: actionChooseRoot, Label: "root", Compact: true},
-		{Key: "a", Action: actionChooseRoot, Label: "add"},
+		{Key: "a", Action: actionChooseRoot, Label: "+"},
+		{Key: "e", Action: actionToggleTree, Label: "tree"},
 		{Key: ", .", Action: actionProjectTab, Label: "tab"},
-		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
+		{Key: "pgup/dn", Action: actionScroll, Label: "scroll"},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
 	}},
@@ -173,10 +175,11 @@ var keymap = map[keyContext]keyContextSpec{
 		{Key: "↑/↓", Action: actionSelect, Label: "select", Compact: true},
 		{Key: "enter", Action: actionConfirm, Label: "open", Compact: true},
 		{Key: "b", Action: actionBuild, Label: "build", Compact: true},
-		{Key: "/", Action: actionFilter, Label: "search", Compact: true},
+		{Key: "/", Action: actionFilter, Label: "find", Compact: true},
 		{Key: "p", Action: actionChooseRoot, Label: "root", Compact: true},
+		{Key: "e", Action: actionToggleTree, Label: "tree"},
 		{Key: ", .", Action: actionProjectTab, Label: "tab", Compact: true},
-		{Key: "pgup/pgdn", Action: actionScroll, Label: "scroll"},
+		{Key: "pgup/dn", Action: actionScroll, Label: "scroll"},
 		{Key: "r", Action: actionRefresh, Label: "rescan", Compact: true},
 		{Key: "?", Action: actionHelp, Label: "help", Compact: true},
 		{Key: "q", Action: actionQuit, Label: "quit", Compact: true},
