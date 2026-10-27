@@ -1519,6 +1519,50 @@ func TestProjectsMouseDoubleClickOpensSolutionDetail(t *testing.T) {
 	}
 }
 
+func TestSolutionMembersCanBeSelectedAndOpened(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 120, 36)
+	workspace := backend.projectResult.Workspaces[0]
+	model = applyMessages(t, model, runCmd(t, model.openWorkspaceDetail(workspace)))
+	if !model.projectDetailWorkspace || model.solutionMemberCursor != 0 {
+		t.Fatalf("workspace detail = %v cursor = %d", model.projectDetailWorkspace, model.solutionMemberCursor)
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyDown})
+	if model.solutionMemberCursor != 1 {
+		t.Fatalf("member cursor = %d, want 1", model.solutionMemberCursor)
+	}
+	plain := ansi.Strip(model.View().Content)
+	if !strings.Contains(plain, "> [ready] Shop.Tests") {
+		t.Fatalf("selected member not rendered:\n%s", plain)
+	}
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil || model.projectDetailWorkspace || model.projectDetailPath != "/work/tests/Shop.Tests/Shop.Tests.csproj" {
+		t.Fatalf("opened member path=%q workspace=%v command=%v", model.projectDetailPath, model.projectDetailWorkspace, command != nil)
+	}
+}
+
+func TestMissingSolutionMemberIsSelectableAndReported(t *testing.T) {
+	backend := newFakeBackend()
+	result := projectFixture()
+	result.Workspaces[0].ProjectPaths = append(result.Workspaces[0].ProjectPaths, "/work/missing/Missing.csproj")
+	backend.projectResult = result
+	model := openProjects(t, backend, 120, 36)
+	model = applyMessages(t, model, runCmd(t, model.openWorkspaceDetail(result.Workspaces[0])))
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyDown})
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	if command != nil || !model.projectDetailWorkspace {
+		t.Fatalf("missing member command=%v workspace=%v", command != nil, model.projectDetailWorkspace)
+	}
+	if !strings.Contains(model.statusMessage, "Selected solution member is missing") {
+		t.Fatalf("status = %q", model.statusMessage)
+	}
+}
+
 func TestProjectFinderMouseSelectsAndDoubleClickOpens(t *testing.T) {
 	backend := newFakeBackend()
 	backend.projectResult = projectFixture()
@@ -1829,6 +1873,187 @@ func TestProjectActionMenuRunsSelectedCommand(t *testing.T) {
 	model = applyMessages(t, model, runCmd(t, command))
 	if backend.calls.count("project-command") != 1 || !strings.Contains(model.statusMessage, "Clean completed") {
 		t.Fatalf("calls=%v status=%q", backend.calls.snapshot(), model.statusMessage)
+	}
+}
+
+func projectActionIndex(model Model, label string) (int, bool) {
+	for index, action := range model.projectActionsForCurrent() {
+		if action.label == label {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func TestPackageActionsRunDotnetCommands(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	requests := []execution.CommandRequest{}
+	backend.commandRequests = &requests
+	model := openProjects(t, backend, 120, 36)
+	updated, openCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, openCommand))
+
+	index, ok := projectActionIndex(model, "List packages")
+	if !ok {
+		t.Fatal("list packages action missing")
+	}
+	model = press(t, model, key('m', "m"))
+	model.projectActionCursor = index
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+	if len(requests) != 1 || strings.Join(requests[0].Arguments, "\x00") != "list\x00/work/src/Shop/Shop.csproj\x00package" {
+		t.Fatalf("list request = %+v", requests)
+	}
+
+	model = press(t, model, key('m', "m"))
+	index, _ = projectActionIndex(model, "Add package")
+	model.projectActionCursor = index
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !model.projectActionPrompt.open {
+		t.Fatal("add package did not open prompt")
+	}
+	model = typeText(t, model, "Serilog")
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+	if model.projectActionPrompt.field != 1 {
+		t.Fatalf("package prompt field after tab = %d kind=%d", model.projectActionPrompt.field, model.projectActionPrompt.kind)
+	}
+	model = typeText(t, model, "4.0.0")
+	if model.projectActionPrompt.version != "4.0.0" {
+		t.Fatalf("package prompt version = %q field=%d", model.projectActionPrompt.version, model.projectActionPrompt.field)
+	}
+	if model.projectActionPrompt.kind != projectActionPromptPackageAdd {
+		t.Fatalf("package prompt kind = %d", model.projectActionPrompt.kind)
+	}
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, command))
+	if len(requests) != 2 {
+		t.Fatalf("requests = %+v", requests)
+	}
+	wantAdd := "add\x00/work/src/Shop/Shop.csproj\x00package\x00Serilog\x00--version\x004.0.0"
+	if strings.Join(requests[1].Arguments, "\x00") != wantAdd {
+		t.Fatalf("add request = %#v", requests[1].Arguments)
+	}
+}
+
+func TestPackageUpdateRemoveRestoreActions(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	requests := []execution.CommandRequest{}
+	backend.commandRequests = &requests
+	model := openProjects(t, backend, 120, 36)
+	updated, openCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, openCommand))
+	var command tea.Cmd
+	for _, item := range []struct {
+		label string
+		name  string
+		want  string
+	}{
+		{label: "Remove package", name: "Serilog", want: "remove\x00/work/src/Shop/Shop.csproj\x00package\x00Serilog"},
+		{label: "Update package", name: "Serilog", want: "add\x00/work/src/Shop/Shop.csproj\x00package\x00Serilog"},
+		{label: "Restore packages", want: "restore\x00/work/src/Shop/Shop.csproj\x00--nologo"},
+	} {
+		model = press(t, model, key('m', "m"))
+		index, ok := projectActionIndex(model, item.label)
+		if !ok {
+			t.Fatalf("action %q missing", item.label)
+		}
+		model.projectActionCursor = index
+		updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		model = updated.(Model)
+		if item.name != "" {
+			model = typeText(t, model, item.name)
+			if item.label == "Update package" {
+				model = press(t, model, tea.KeyPressMsg{Code: tea.KeyTab})
+				model = typeText(t, model, "4.0.0")
+			}
+			updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			model = updated.(Model)
+		}
+		model = applyMessages(t, model, runCmd(t, command))
+		if len(requests) == 0 {
+			t.Fatal("action did not execute")
+		}
+		got := strings.Join(requests[len(requests)-1].Arguments, "\x00")
+		if item.label == "Update package" {
+			if got != item.want+"\x00--version\x004.0.0" {
+				t.Fatalf("%s args = %q", item.label, got)
+			}
+		} else if got != item.want {
+			t.Fatalf("%s args = %q, want %q", item.label, got, item.want)
+		}
+	}
+}
+
+func TestEFActionsOnlyAppearWhenDetected(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	model := openProjects(t, backend, 120, 36)
+	updated, openCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, openCommand))
+	for _, label := range []string{"List migrations", "Add migration", "Update database", "Remove migration"} {
+		if _, ok := projectActionIndex(model, label); !ok {
+			t.Fatalf("EF action %q missing", label)
+		}
+	}
+
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyEsc})
+	model = press(t, model, tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, openCommand = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, openCommand))
+	if _, ok := projectActionIndex(model, "List migrations"); ok {
+		t.Fatal("EF action should be hidden for a project without EF Core")
+	}
+}
+
+func TestEFActionsRunDotnetCommands(t *testing.T) {
+	backend := newFakeBackend()
+	backend.projectResult = projectFixture()
+	requests := []execution.CommandRequest{}
+	backend.commandRequests = &requests
+	model := openProjects(t, backend, 120, 36)
+	updated, openCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = updated.(Model)
+	model = applyMessages(t, model, runCmd(t, openCommand))
+
+	for _, item := range []struct {
+		label  string
+		prompt string
+		want   string
+	}{
+		{label: "List migrations", want: "ef\x00migrations\x00list\x00--project\x00/work/src/Shop/Shop.csproj"},
+		{label: "Add migration", prompt: "InitialCreate", want: "ef\x00migrations\x00add\x00InitialCreate\x00--project\x00/work/src/Shop/Shop.csproj"},
+		{label: "Update database", want: "ef\x00database\x00update\x00--project\x00/work/src/Shop/Shop.csproj"},
+		{label: "Remove migration", want: "ef\x00migrations\x00remove\x00--project\x00/work/src/Shop/Shop.csproj"},
+	} {
+		model = press(t, model, key('m', "m"))
+		index, ok := projectActionIndex(model, item.label)
+		if !ok {
+			t.Fatalf("action %q missing", item.label)
+		}
+		model.projectActionCursor = index
+		updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		model = updated.(Model)
+		if item.prompt != "" {
+			if !model.projectActionPrompt.open {
+				t.Fatalf("action %q did not open prompt", item.label)
+			}
+			model = typeText(t, model, item.prompt)
+			updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			model = updated.(Model)
+		}
+		model = applyMessages(t, model, runCmd(t, command))
+		got := strings.Join(requests[len(requests)-1].Arguments, "\x00")
+		if got != item.want {
+			t.Fatalf("%s args = %q, want %q", item.label, got, item.want)
+		}
 	}
 }
 
